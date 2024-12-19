@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/werf/common/pkg/secret"
+	"github.com/werf/common-go/pkg/secret"
 )
 
 var WerfHomeDir string

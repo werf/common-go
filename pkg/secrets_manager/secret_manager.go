@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/werf/common/pkg/secret"
+	"github.com/werf/common-go/pkg/secret"
 	"github.com/werf/logboek"
 )
 

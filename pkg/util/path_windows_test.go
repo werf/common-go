@@ -6,7 +6,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/werf/common/pkg/util"
+	"github.com/werf/common-go/pkg/util"
 )
 
 type splitPathTest struct {
