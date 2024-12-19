@@ -9,9 +9,9 @@ import (
 
 	"github.com/werf/3p-helm/pkg/chart"
 	"github.com/werf/3p-helm/pkg/werf/file"
-	"github.com/werf/common/pkg/secret"
-	"github.com/werf/common/pkg/secrets_manager"
-	"github.com/werf/common/pkg/secretvalues"
+	"github.com/werf/common-go/pkg/secret"
+	"github.com/werf/common-go/pkg/secrets_manager"
+	"github.com/werf/common-go/pkg/secretvalues"
 )
 
 type SecretsRuntimeData struct {
