@@ -1,4 +1,4 @@
-module github.com/werf/common
+module github.com/werf/common-go
 
 go 1.22.7
 
