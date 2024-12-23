@@ -8,6 +8,8 @@ import (
 	"github.com/werf/logboek"
 )
 
+var DefaultManager *SecretsManager
+
 type SecretsManager struct {
 	DisableSecretsDecryption bool
 
