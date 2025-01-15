@@ -10,6 +10,7 @@ import (
 	"github.com/werf/common-go/pkg/secret"
 )
 
+// FIXME(ilya-lesikov): init this in Nelm too
 var WerfHomeDir string
 
 func GenerateSecretKey() ([]byte, error) {
