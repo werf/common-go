@@ -10,15 +10,23 @@ import (
 	"github.com/werf/common-go/pkg/secret"
 )
 
-var WerfHomeDir string
+var werfHomeDir string
 
-func init() {
-	userHomeDir, err := os.UserHomeDir()
-	if err != nil {
-		panic(fmt.Sprintf("get user home dir failed: %s", err))
+func WerfHomeDir() (string, error) {
+	if werfHomeDir == "" {
+		userHomeDir, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("get user home dir: %w", err)
+		}
+
+		werfHomeDir = filepath.Join(userHomeDir, ".werf")
 	}
 
-	WerfHomeDir = filepath.Join(userHomeDir, ".werf")
+	return werfHomeDir, nil
+}
+
+func SetWerfHomeDir(dir string) {
+	werfHomeDir = dir
 }
 
 func GenerateSecretKey() ([]byte, error) {
@@ -52,7 +60,12 @@ func GetRequiredSecretKey(workingDir string) ([]byte, error) {
 			}
 		}
 
-		werfSecretKeyPaths = append(werfSecretKeyPaths, filepath.Join(WerfHomeDir, "global_secret_key"))
+		werfHomeDir, err := WerfHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("get werf home dir: %w", err)
+		}
+
+		werfSecretKeyPaths = append(werfSecretKeyPaths, filepath.Join(werfHomeDir, "global_secret_key"))
 
 		for _, path := range werfSecretKeyPaths {
 			exist, err := FileExists(path)

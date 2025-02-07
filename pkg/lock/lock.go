@@ -11,19 +11,27 @@ import (
 	"github.com/werf/logboek"
 )
 
-var HostLocker lockgate.Locker
+var hostLocker lockgate.Locker
 
-func init() {
-	userHomeDir, err := os.UserHomeDir()
-	if err != nil {
-		panic(fmt.Sprintf("get user home dir failed: %s", err))
+func HostLocker() (lockgate.Locker, error) {
+	if hostLocker == nil {
+		userHomeDir, err := os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("get user home dir: %w", err)
+		}
+
+		if locker, err := file_locker.NewFileLocker(filepath.Join(userHomeDir, ".werf", "service", "locks")); err != nil {
+			return nil, fmt.Errorf("construct new file locker: %w", err)
+		} else {
+			hostLocker = locker
+		}
 	}
 
-	if locker, err := file_locker.NewFileLocker(filepath.Join(userHomeDir, ".werf", "service", "locks")); err != nil {
-		panic(fmt.Sprintf("construct new file locker: %s", err))
-	} else {
-		HostLocker = locker
-	}
+	return hostLocker, nil
+}
+
+func SetHostLocker(locker lockgate.Locker) {
+	hostLocker = locker
 }
 
 func SetupLockerDefaultOptions(ctx context.Context, opts lockgate.AcquireOptions) lockgate.AcquireOptions {
@@ -37,17 +45,32 @@ func SetupLockerDefaultOptions(ctx context.Context, opts lockgate.AcquireOptions
 }
 
 func WithHostLock(ctx context.Context, lockName string, opts lockgate.AcquireOptions, f func() error) error {
-	return lockgate.WithAcquire(HostLocker, lockName, SetupLockerDefaultOptions(ctx, opts), func(_ bool) error {
+	hostLocker, err := HostLocker()
+	if err != nil {
+		return fmt.Errorf("get host locker: %w", err)
+	}
+
+	return lockgate.WithAcquire(hostLocker, lockName, SetupLockerDefaultOptions(ctx, opts), func(_ bool) error {
 		return f()
 	})
 }
 
 func AcquireHostLock(ctx context.Context, lockName string, opts lockgate.AcquireOptions) (bool, lockgate.LockHandle, error) {
-	return HostLocker.Acquire(lockName, SetupLockerDefaultOptions(ctx, opts))
+	hostLocker, err := HostLocker()
+	if err != nil {
+		return false, lockgate.LockHandle{}, fmt.Errorf("get host locker: %w", err)
+	}
+
+	return hostLocker.Acquire(lockName, SetupLockerDefaultOptions(ctx, opts))
 }
 
 func ReleaseHostLock(lock lockgate.LockHandle) error {
-	return HostLocker.Release(lock)
+	hostLocker, err := HostLocker()
+	if err != nil {
+		return fmt.Errorf("get host locker: %w", err)
+	}
+
+	return hostLocker.Release(lock)
 }
 
 func DefaultLockerOnWait(ctx context.Context) func(lockName string, doWait func() error) error {
