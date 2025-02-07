@@ -3,13 +3,28 @@ package chart
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/werf/lockgate"
+	"github.com/werf/lockgate/pkg/file_locker"
 	"github.com/werf/logboek"
 )
 
-// FIXME(ilya-lesikov): init this in Nelm/helm too
 var HostLocker lockgate.Locker
+
+func init() {
+	userHomeDir, err := os.UserHomeDir()
+	if err != nil {
+		panic(fmt.Sprintf("get user home dir failed: %s", err))
+	}
+
+	if locker, err := file_locker.NewFileLocker(filepath.Join(userHomeDir, ".werf", "service", "locks")); err != nil {
+		panic(fmt.Sprintf("construct new file locker: %s", err))
+	} else {
+		HostLocker = locker
+	}
+}
 
 func SetupLockerDefaultOptions(ctx context.Context, opts lockgate.AcquireOptions) lockgate.AcquireOptions {
 	if opts.OnWaitFunc == nil {
