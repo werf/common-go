@@ -8,22 +8,15 @@ import (
 	"github.com/werf/logboek"
 )
 
-var DefaultManager *SecretsManager
+var Manager *SecretsManager = NewSecretsManager()
+var DisableSecretsDecryption bool
 
 type SecretsManager struct {
-	DisableSecretsDecryption bool
-
 	missedSecretKeyModeEnabled bool
 }
 
-type SecretsManagerOptions struct {
-	DisableSecretsDecryption bool
-}
-
-func NewSecretsManager(opts SecretsManagerOptions) *SecretsManager {
-	return &SecretsManager{
-		DisableSecretsDecryption: opts.DisableSecretsDecryption,
-	}
+func NewSecretsManager() *SecretsManager {
+	return &SecretsManager{}
 }
 
 func (manager *SecretsManager) IsMissedSecretKeyModeEnabled() bool {
@@ -43,7 +36,7 @@ func (manager *SecretsManager) AllowMissedSecretKeyMode(workingDir string) error
 }
 
 func (manager *SecretsManager) GetYamlEncoder(ctx context.Context, workingDir string) (*secret.YamlEncoder, error) {
-	if manager.DisableSecretsDecryption {
+	if DisableSecretsDecryption {
 		logboek.Context(ctx).Default().LogLnDetails("Secrets decryption disabled")
 		return secret.NewYamlEncoder(nil), nil
 	}
