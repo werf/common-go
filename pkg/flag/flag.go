@@ -74,14 +74,14 @@ func Add[T any](cmd *cobra.Command, dest *T, name string, defaultValue T, help s
 		}
 	}
 
-	if err := processEnvVars(cmd, envVarRegexExprs, name, dest); err != nil {
-		return fmt.Errorf("process env vars: %w", err)
-	}
-
 	if opts.Required {
 		if err := cmd.MarkFlagRequired(name); err != nil {
 			return fmt.Errorf("mark flag as required: %w", err)
 		}
+	}
+
+	if err := processEnvVars(cmd, envVarRegexExprs, name, dest); err != nil {
+		return fmt.Errorf("process env vars: %w", err)
 	}
 
 	switch opts.Type {
@@ -202,7 +202,10 @@ func processEnvVars[T any](cmd *cobra.Command, envVarRegexExprs []*RegexExpr, fl
 					continue
 				}
 
-				if err := cmd.Flag(flagName).Value.Set(val); err != nil {
+				flag := cmd.Flag(flagName)
+				flag.Changed = true
+
+				if err := flag.Value.Set(val); err != nil {
 					return fmt.Errorf("environment variable %q value %q is not valid: %w", key, val, err)
 				}
 
@@ -217,14 +220,20 @@ func processEnvVars[T any](cmd *cobra.Command, envVarRegexExprs []*RegexExpr, fl
 			}
 
 			for _, part := range parts {
-				if err := cmd.Flag(flagName).Value.(pflag.SliceValue).Append(part); err != nil {
+				flag := cmd.Flag(flagName)
+				flag.Changed = true
+
+				if err := flag.Value.(pflag.SliceValue).Append(part); err != nil {
 					return fmt.Errorf("environment variable %q value %q is not valid: %w", key, val, err)
 				}
 			}
 		}
 	case *map[string]string:
 		for key, val := range envs {
-			if err := cmd.Flag(flagName).Value.Set(val); err != nil {
+			flag := cmd.Flag(flagName)
+			flag.Changed = true
+
+			if err := flag.Value.Set(val); err != nil {
 				return fmt.Errorf("environment variable %q value %q is not valid: %w", key, val, err)
 			}
 		}
