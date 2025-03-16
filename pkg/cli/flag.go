@@ -1,4 +1,4 @@
-package flag
+package cli
 
 import (
 	"encoding/csv"
@@ -14,19 +14,26 @@ import (
 	"github.com/spf13/pflag"
 )
 
-type AddOptions struct {
+type FlagType string
+
+const (
+	FlagTypeDir  FlagType = "dir"
+	FlagTypeFile FlagType = "file"
+)
+
+type AddFlagOptions struct {
 	// This function must return a slice of regexps to be matched agains all environment variables.
 	// Values of matched environment variables will become the flag value. Values priority (from
 	// lowest to highest): flag default value -> environment variable value (from first to last
 	// regexp; if regexp matches multiple env vars then the last has higher priority) -> cli flag
 	// value. For slice and map-type flags: all env vars values and all cli flags values are joined.
-	GetEnvVarRegexesFunc GetEnvVarRegexesInterface
+	GetEnvVarRegexesFunc GetFlagEnvVarRegexesInterface
 
 	// Group info is saved in Flag annotations, which can be used later, e.g. for grouping flags in
 	// the --help output.
-	Group *Group
+	Group *FlagGroup
 
-	Type       Type
+	Type       FlagType
 	ShortName  string
 	Deprecated bool
 	Hidden     bool
@@ -42,7 +49,7 @@ type AddOptions struct {
 // Create and bind a flag to the Cobra command. Corresponding environment variables (if enabled)
 // parsed and the value is assigned to the flag immediately. Flag value type inferred from
 // destination arg.
-func Add[T any](cmd *cobra.Command, dest *T, name string, defaultValue T, help string, opts AddOptions) error {
+func AddFlag[T any](cmd *cobra.Command, dest *T, name string, defaultValue T, help string, opts AddFlagOptions) error {
 	opts, err := applyAddOptionsDefaults(opts, dest)
 	if err != nil {
 		return fmt.Errorf("apply defaults: %w", err)
@@ -85,11 +92,11 @@ func Add[T any](cmd *cobra.Command, dest *T, name string, defaultValue T, help s
 	}
 
 	switch opts.Type {
-	case TypeDir:
+	case FlagTypeDir:
 		if err := cmd.MarkFlagDirname(name); err != nil {
 			return fmt.Errorf("mark flag as a directory: %w", err)
 		}
-	case TypeFile:
+	case FlagTypeFile:
 		if err := cmd.MarkFlagFilename(name); err != nil {
 			return fmt.Errorf("mark flag as a filename: %w", err)
 		}
@@ -104,22 +111,22 @@ func Add[T any](cmd *cobra.Command, dest *T, name string, defaultValue T, help s
 	return nil
 }
 
-func applyAddOptionsDefaults[T any](opts AddOptions, dest *T) (AddOptions, error) {
+func applyAddOptionsDefaults[T any](opts AddFlagOptions, dest *T) (AddFlagOptions, error) {
 	if opts.GetEnvVarRegexesFunc == nil {
 		switch dst := any(dest).(type) {
 		case *bool, *int, *string, *time.Duration:
-			opts.GetEnvVarRegexesFunc = GetLocalEnvVarRegexes
+			opts.GetEnvVarRegexesFunc = GetFlagLocalEnvVarRegexes
 		case *[]string, *map[string]string:
-			opts.GetEnvVarRegexesFunc = GetLocalMultiEnvVarRegexes
+			opts.GetEnvVarRegexesFunc = GetFlagLocalMultiEnvVarRegexes
 		default:
-			return AddOptions{}, fmt.Errorf("unsupported type %T", dst)
+			return AddFlagOptions{}, fmt.Errorf("unsupported type %T", dst)
 		}
 	}
 
 	return opts, nil
 }
 
-func buildHelp[T any](help string, dest *T, envVarRegexes []*RegexExpr) (string, error) {
+func buildHelp[T any](help string, dest *T, envVarRegexes []*FlagRegexExpr) (string, error) {
 	if !strings.HasSuffix(help, ".") {
 		help += "."
 	}
@@ -161,14 +168,14 @@ func addFlags[T any](cmd *cobra.Command, dest *T, name string, shortName string,
 	return nil
 }
 
-func processEnvVars[T any](cmd *cobra.Command, envVarRegexExprs []*RegexExpr, flagName string, dest T) error {
+func processEnvVars[T any](cmd *cobra.Command, envVarRegexExprs []*FlagRegexExpr, flagName string, dest T) error {
 	for _, regExpr := range envVarRegexExprs {
 		regex, err := regexp.Compile(fmt.Sprintf(`%s`, regExpr.Expr))
 		if err != nil {
 			return fmt.Errorf("compile regex %q: %w", regExpr.Expr, err)
 		}
 
-		definedEnvVarRegexes[*regExpr] = regex
+		definedFlagEnvVarRegexes[*regExpr] = regex
 	}
 
 	lo.Reverse(envVarRegexExprs)
@@ -185,7 +192,7 @@ func processEnvVars[T any](cmd *cobra.Command, envVarRegexExprs []*RegexExpr, fl
 	envs := map[string]string{}
 	for key, val := range envir {
 		for _, regexExpr := range envVarRegexExprs {
-			if !definedEnvVarRegexes[*regexExpr].MatchString(key) || val == "" {
+			if !definedFlagEnvVarRegexes[*regexExpr].MatchString(key) || val == "" {
 				continue
 			}
 
@@ -198,7 +205,7 @@ func processEnvVars[T any](cmd *cobra.Command, envVarRegexExprs []*RegexExpr, fl
 	envirLoop:
 		for key, val := range envir {
 			for _, regexExpr := range envVarRegexExprs {
-				if !definedEnvVarRegexes[*regexExpr].MatchString(key) || val == "" {
+				if !definedFlagEnvVarRegexes[*regexExpr].MatchString(key) || val == "" {
 					continue
 				}
 
@@ -244,16 +251,16 @@ func processEnvVars[T any](cmd *cobra.Command, envVarRegexExprs []*RegexExpr, fl
 	return nil
 }
 
-func saveFlagGroupMetadata(cmd *cobra.Command, flagName string, group *Group) error {
-	if err := cmd.Flags().SetAnnotation(flagName, GroupIDAnnotationName, []string{group.ID}); err != nil {
+func saveFlagGroupMetadata(cmd *cobra.Command, flagName string, group *FlagGroup) error {
+	if err := cmd.Flags().SetAnnotation(flagName, FlagGroupIDAnnotationName, []string{group.ID}); err != nil {
 		return fmt.Errorf("set group id annotation: %w", err)
 	}
 
-	if err := cmd.Flags().SetAnnotation(flagName, GroupTitleAnnotationName, []string{group.Title}); err != nil {
+	if err := cmd.Flags().SetAnnotation(flagName, FlagGroupTitleAnnotationName, []string{group.Title}); err != nil {
 		return fmt.Errorf("set group title annotation: %w", err)
 	}
 
-	if err := cmd.Flags().SetAnnotation(flagName, GroupPriorityAnnotationName, []string{fmt.Sprintf("%d", group.Priority)}); err != nil {
+	if err := cmd.Flags().SetAnnotation(flagName, FlagGroupPriorityAnnotationName, []string{fmt.Sprintf("%d", group.Priority)}); err != nil {
 		return fmt.Errorf("set group priority annotation: %w", err)
 	}
 
