@@ -2,6 +2,7 @@ package secret
 
 import (
 	"fmt"
+	"gopkg.in/yaml.v3"
 	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
