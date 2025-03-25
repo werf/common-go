@@ -2,6 +2,7 @@ package chart
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,6 +13,10 @@ import (
 )
 
 var hostLocker lockgate.Locker
+
+var (
+	ErrNotAcquired = errors.New("lock is not acquired")
+)
 
 func HostLocker() (lockgate.Locker, error) {
 	if hostLocker == nil {
@@ -44,13 +49,16 @@ func SetupLockerDefaultOptions(ctx context.Context, opts lockgate.AcquireOptions
 	return opts
 }
 
-func WithHostLock(ctx context.Context, lockName string, opts lockgate.AcquireOptions, f func() error) error {
+func WithHostLock(ctx context.Context, lockName string, opts lockgate.AcquireOptions, f func() error) (errRes error) {
 	hostLocker, err := HostLocker()
 	if err != nil {
 		return fmt.Errorf("get host locker: %w", err)
 	}
 
-	return lockgate.WithAcquire(hostLocker, lockName, SetupLockerDefaultOptions(ctx, opts), func(_ bool) error {
+	return lockgate.WithAcquire(hostLocker, lockName, SetupLockerDefaultOptions(ctx, opts), func(acquired bool) error {
+		if !acquired {
+			return ErrNotAcquired
+		}
 		return f()
 	})
 }
