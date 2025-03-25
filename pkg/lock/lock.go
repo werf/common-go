@@ -49,6 +49,9 @@ func WithHostLock(ctx context.Context, lockName string, opts lockgate.AcquireOpt
 	if err != nil {
 		return fmt.Errorf("get host locker: %w", err)
 	}
+	if opts.NonBlocking {
+		logboek.Context(ctx).Warn().LogLn("Callback will be called anyway including 'acquired=false' lock's status.")
+	}
 
 	return lockgate.WithAcquire(hostLocker, lockName, SetupLockerDefaultOptions(ctx, opts), func(_ bool) error {
 		return f()
