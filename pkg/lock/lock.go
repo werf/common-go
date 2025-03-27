@@ -44,13 +44,12 @@ func SetupLockerDefaultOptions(ctx context.Context, opts lockgate.AcquireOptions
 	return opts
 }
 
+// WithHostLock acquires host lock and executes callback opts.NonBlocking=false.
+// Be aware, if opts.NonBlocking=true it does "try lock", ignores lock's status and executes callback anyway.
 func WithHostLock(ctx context.Context, lockName string, opts lockgate.AcquireOptions, f func() error) error {
 	hostLocker, err := HostLocker()
 	if err != nil {
 		return fmt.Errorf("get host locker: %w", err)
-	}
-	if opts.NonBlocking {
-		logboek.Context(ctx).Warn().LogLn("Callback will be called anyway including 'acquired=false' lock's status.")
 	}
 
 	return lockgate.WithAcquire(hostLocker, lockName, SetupLockerDefaultOptions(ctx, opts), func(_ bool) error {
