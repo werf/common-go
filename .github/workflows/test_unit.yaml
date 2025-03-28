@@ -20,7 +20,7 @@ jobs:
         uses: arduino/setup-task@v2
 
       - name: Install project dependencies
-        uses: task deps:install
+        run: task deps:install
 
       - name: Test Unit
         run: task test:unit
