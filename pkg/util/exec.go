@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 )
 
 // ExecWerfBinaryCmd
@@ -19,6 +20,9 @@ func ExecWerfBinaryCmdContext(ctx context.Context, args ...string) *exec.Cmd {
 
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	cmd.Cancel = func() error {
+		return cmd.Process.Signal(syscall.SIGTERM)
+	}
 
 	return cmd
 }
