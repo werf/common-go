@@ -1,13 +1,15 @@
 package util
 
 import (
+	"context"
+	"github.com/werf/common-go/pkg/graceful"
 	"os"
-	"os/exec"
 	"strings"
 )
 
-func ExecWerfBinaryCmd(args ...string) *exec.Cmd {
-	cmd := exec.Command(strings.TrimSuffix(os.Args[0], "-in-a-user-namespace"), args...)
+// ExecWerfBinaryCmdContext executes werf binary in a user namespace.
+func ExecWerfBinaryCmdContext(ctx context.Context, args ...string) *graceful.Cmd {
+	cmd := graceful.ExecCommandContext(ctx, strings.TrimSuffix(os.Args[0], "-in-a-user-namespace"), args...)
 
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -15,6 +17,7 @@ func ExecWerfBinaryCmd(args ...string) *exec.Cmd {
 	return cmd
 }
 
-func ExecKubectlCmd(args ...string) *exec.Cmd {
-	return ExecWerfBinaryCmd(append([]string{"kubectl"}, args...)...)
+// ExecKubectlCmdContext executes werf kubectl command.
+func ExecKubectlCmdContext(ctx context.Context, args ...string) *graceful.Cmd {
+	return ExecWerfBinaryCmdContext(ctx, append([]string{"kubectl"}, args...)...)
 }
