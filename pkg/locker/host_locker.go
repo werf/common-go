@@ -20,6 +20,10 @@ func NewHostLocker(locksDir string) (*HostLocker, error) {
 	return &HostLocker{locker: locker}, nil
 }
 
+func (hl *HostLocker) Locker() lockgate.Locker {
+	return hl.locker
+}
+
 func (hl *HostLocker) AcquireLock(ctx context.Context, lockName string, opts lockgate.AcquireOptions) (bool, lockgate.LockHandle, error) {
 	return hl.locker.Acquire(lockName, SetupDefaultOptions(ctx, opts))
 }
