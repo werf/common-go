@@ -21,7 +21,7 @@ func NewHostLocker(locksDir string) (*HostLocker, error) {
 }
 
 func (hl *HostLocker) AcquireLock(ctx context.Context, lockName string, opts lockgate.AcquireOptions) (bool, lockgate.LockHandle, error) {
-	return hl.locker.Acquire(lockName, hl.applyDefaultOptions(ctx, opts))
+	return hl.locker.Acquire(lockName, SetupDefaultOptions(ctx, opts))
 }
 
 func (hl *HostLocker) ReleaseLock(lock lockgate.LockHandle) error {
@@ -31,12 +31,12 @@ func (hl *HostLocker) ReleaseLock(lock lockgate.LockHandle) error {
 // WithLock acquires host lock and executes callback opts.NonBlocking=false.
 // Be aware, if opts.NonBlocking=true it does "try lock", ignores lock's status and executes callback anyway.
 func (hl *HostLocker) WithLock(ctx context.Context, lockName string, opts lockgate.AcquireOptions, f func() error) error {
-	return lockgate.WithAcquire(hl.locker, lockName, hl.applyDefaultOptions(ctx, opts), func(_ bool) error {
+	return lockgate.WithAcquire(hl.locker, lockName, SetupDefaultOptions(ctx, opts), func(_ bool) error {
 		return f()
 	})
 }
 
-func (hl *HostLocker) applyDefaultOptions(ctx context.Context, opts lockgate.AcquireOptions) lockgate.AcquireOptions {
+func SetupDefaultOptions(ctx context.Context, opts lockgate.AcquireOptions) lockgate.AcquireOptions {
 	if opts.OnWaitFunc == nil {
 		opts.OnWaitFunc = defaultOnWaitFunc(ctx)
 	}
