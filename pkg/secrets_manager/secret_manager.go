@@ -9,7 +9,6 @@ import (
 )
 
 var Manager *SecretsManager = NewSecretsManager()
-var DisableSecretsDecryption bool
 
 type SecretsManager struct {
 	missedSecretKeyModeEnabled bool
@@ -35,8 +34,8 @@ func (manager *SecretsManager) AllowMissedSecretKeyMode(workingDir string) error
 	return nil
 }
 
-func (manager *SecretsManager) GetYamlEncoder(ctx context.Context, workingDir string) (*secret.YamlEncoder, error) {
-	if DisableSecretsDecryption {
+func (manager *SecretsManager) GetYamlEncoder(ctx context.Context, workingDir string, noDecryptSecrets bool) (*secret.YamlEncoder, error) {
+	if noDecryptSecrets {
 		logboek.Context(ctx).Default().LogLnDetails("Secrets decryption disabled")
 		return secret.NewYamlEncoder(nil), nil
 	}
