@@ -1,60 +1,50 @@
 package graceful
 
 import (
-	"context"
 	"errors"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"os"
-	"os/signal"
 	"sync"
-	"syscall"
 )
 
 var _ = Describe("graceful core", func() {
 	Describe("WithTermination()", func() {
-		It("should return terminationCtx", func(ctx SpecContext) {
+		It("should return ctx with termination", func(ctx SpecContext) {
 			terminationCtx := WithTermination(ctx)
-			expectedCtx, stop := signal.NotifyContext(ctx, os.Interrupt)
-			Expect(terminationCtx).To(BeAssignableToTypeOf(expectedCtx))
-			stop()
-			signal.Reset(os.Interrupt, syscall.SIGTERM)
+			term, ok := terminationCtx.Value(terminationKey).(*termination)
+			Expect(ok).To(BeTrue())
+			term.cancel()
 		})
 	})
+
 	Describe("Terminate()", func() {
-		It("should not panic if called before WithTermination()", func() {
-			cancelNotify = nil
-			err0 := errors.New("some err")
-
-			Terminate(err0, 1)
-
-			Expect(terminationErrChan).To(Receive(Equal(terminationError{
-				err:      err0,
-				exitCode: 1,
-			})))
+		It("should not panic if ctx has not termination", func(ctx SpecContext) {
+			Expect(func() {
+				Terminate(ctx, errors.New("some err"), 1)
+			}).To(PanicWith(MatchRegexp("context is not termination")))
 		})
 		It("should work for single usage", func(ctx SpecContext) {
-			_ = WithTermination(ctx)
+			terminationCtx := WithTermination(ctx)
 			err0 := errors.New("some err")
-			Terminate(err0, 1)
-			Expect(terminationErrChan).To(Receive(Equal(terminationError{
+			Terminate(terminationCtx, err0, 1)
+			Expect(terminationCtx.Value(terminationKey).(*termination).errChan).To(Receive(Equal(terminationError{
 				err:      err0,
 				exitCode: 1,
 			})))
 		})
 		It("should do FIFO for sequential double usage", func(ctx SpecContext) {
-			_ = WithTermination(ctx)
+			terminationCtx := WithTermination(ctx)
 			err0 := errors.New("some err")
 			err1 := errors.New("another err")
-			Terminate(err0, 1)
-			Terminate(err1, 2)
-			Expect(terminationErrChan).To(Receive(Equal(terminationError{
+			Terminate(terminationCtx, err0, 1)
+			Terminate(terminationCtx, err1, 2)
+			Expect(terminationCtx.Value(terminationKey).(*termination).errChan).To(Receive(Equal(terminationError{
 				err:      err0,
 				exitCode: 1,
 			})))
 		})
 		It("should be safe for concurrent usage", func(ctx SpecContext) {
-			_ = WithTermination(ctx)
+			terminationCtx := WithTermination(ctx)
 
 			err0 := errors.New("some err")
 			err1 := errors.New("another err")
@@ -63,36 +53,55 @@ var _ = Describe("graceful core", func() {
 			wg.Add(2)
 			go func() {
 				defer wg.Done()
-				Terminate(err0, 1)
+				Terminate(terminationCtx, err0, 1)
 			}()
 			go func() {
 				defer wg.Done()
-				Terminate(err1, 2)
+				Terminate(terminationCtx, err1, 2)
 			}()
 			wg.Wait()
 
-			Expect(terminationErrChan).To(HaveLen(1))
+			Expect(terminationCtx.Value(terminationKey).(*termination).errChan).To(HaveLen(1))
+		})
+	})
+	Describe("IsTerminationContext()", func() {
+		It("should return 'false' if ctx has not termination", func(ctx SpecContext) {
+			Expect(IsTerminationContext(ctx)).To(BeFalse())
+		})
+		It("should return 'true' if ctx has termination", func(ctx SpecContext) {
+			terminationCtx := WithTermination(ctx)
+			terminationCtx.Value(terminationKey).(*termination).cancel()
+			Expect(IsTerminationContext(terminationCtx)).To(BeTrue())
 		})
 	})
 	Describe("IsTerminating()", func() {
-		It("should return 'false' if ctx is not done", func(ctx SpecContext) {
+		It("should return 'false' if ctx has termination", func(ctx SpecContext) {
 			Expect(IsTerminating(ctx)).To(BeFalse())
 		})
-		It("should return 'true' if ctx is not done", func(ctx SpecContext) {
-			ctx0, cancel := context.WithCancel(ctx)
-			cancel()
-			Expect(IsTerminating(ctx0)).To(BeTrue())
+		It("should return 'false' if ctx has termination but it is not terminated yet", func(ctx SpecContext) {
+			terminationCtx := WithTermination(ctx)
+			Expect(IsTerminating(terminationCtx)).To(BeFalse())
+			terminationCtx.Value(terminationKey).(*termination).cancel()
 		})
+		It("should return 'true' if ctx has termination and it is terminated", func(ctx SpecContext) {
+			terminationCtx := WithTermination(ctx)
+			terminationCtx.Value(terminationKey).(*termination).cancel()
+			Expect(IsTerminating(terminationCtx)).To(BeTrue())
+		})
+		It("should return 'true' if ctx has termination and ctx is wrapped with another one", func(ctx SpecContext) {})
 		It("should be safe for concurrent usage", func(ctx SpecContext) {
+			terminationCtx := WithTermination(ctx)
+			terminationCtx.Value(terminationKey).(*termination).cancel()
+
 			wg := sync.WaitGroup{}
 			wg.Add(2)
 			go func() {
 				defer wg.Done()
-				Expect(IsTerminating(ctx)).To(BeFalse())
+				Expect(IsTerminating(terminationCtx)).To(BeTrue())
 			}()
 			go func() {
 				defer wg.Done()
-				Expect(IsTerminating(ctx)).To(BeFalse())
+				Expect(IsTerminating(terminationCtx)).To(BeTrue())
 			}()
 			wg.Wait()
 		})
@@ -100,26 +109,19 @@ var _ = Describe("graceful core", func() {
 	Describe("Shutdown()", func() {
 		var spyCallback *spyCallbackHelper
 		BeforeEach(func() {
-			terminationErrChan = make(chan terminationError, 1)
 			spyCallback = &spyCallbackHelper{}
 		})
-		It("should not panic if called before WithTermination()", func(ctx SpecContext) {
-			cancelNotify = nil
+		It("should not panic if ctx has not termination", func(ctx SpecContext) {
+			Expect(func() {
+				Shutdown(ctx, spyCallback.Method)
+			}).To(PanicWith(MatchRegexp("context is not termination")))
 
-			ctx0, cancel := context.WithCancel(ctx)
-			cancel()
-
-			Shutdown(ctx0, spyCallback.Method)
-
-			Expect(spyCallback).To(Equal(&spyCallbackHelper{
-				callsCount: 1,
-				err:        errors.New("process terminated"),
-				exitCode:   143,
-			}))
+			Expect(spyCallback).To(Equal(&spyCallbackHelper{}))
 		})
-		It("should ensure termination err if terminationCtx is done", func(ctx SpecContext) {
+		It("should ensure termination err if termination is in progress", func(ctx SpecContext) {
 			terminationCtx := WithTermination(ctx)
-			cancelNotify()
+			terminationCtx.Value(terminationKey).(*termination).cancel()
+
 			Shutdown(terminationCtx, spyCallback.Method)
 
 			Expect(spyCallback).To(Equal(&spyCallbackHelper{
@@ -142,14 +144,17 @@ var _ = Describe("graceful core", func() {
 				exitCode:   1,
 			}))
 		})
-		It("should do nothing if terminationCtx is not done and no panic", func(ctx SpecContext) {
-			Shutdown(WithTermination(ctx), spyCallback.Method)
+		It("should do nothing if termination is not in progress and no panic", func(ctx SpecContext) {
+			terminationCtx := WithTermination(ctx)
+			Shutdown(terminationCtx, spyCallback.Method)
 
 			Expect(spyCallback).To(Equal(&spyCallbackHelper{
 				callsCount: 0,
 				err:        nil,
 				exitCode:   0,
 			}))
+
+			terminationCtx.Value(terminationKey).(*termination).cancel()
 		})
 	})
 })
