@@ -1,10 +1,12 @@
 package graceful
 
 import (
+	"context"
 	"errors"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"sync"
+	"syscall"
 )
 
 var _ = Describe("graceful core", func() {
@@ -13,7 +15,7 @@ var _ = Describe("graceful core", func() {
 			terminationCtx := WithTermination(ctx)
 			term, ok := terminationCtx.Value(terminationKey).(*termination)
 			Expect(ok).To(BeTrue())
-			term.cancel()
+			term.run(TerminationDescriptor{})
 		})
 	})
 
@@ -27,7 +29,7 @@ var _ = Describe("graceful core", func() {
 			terminationCtx := WithTermination(ctx)
 			err0 := errors.New("some err")
 			Terminate(terminationCtx, err0, 1)
-			Expect(terminationCtx.Value(terminationKey).(*termination).errChan).To(Receive(Equal(terminationError{
+			Expect(terminationCtx.Value(terminationKey).(*termination).descChan).To(Receive(Equal(TerminationDescriptor{
 				err:      err0,
 				exitCode: 1,
 			})))
@@ -38,7 +40,7 @@ var _ = Describe("graceful core", func() {
 			err1 := errors.New("another err")
 			Terminate(terminationCtx, err0, 1)
 			Terminate(terminationCtx, err1, 2)
-			Expect(terminationCtx.Value(terminationKey).(*termination).errChan).To(Receive(Equal(terminationError{
+			Expect(terminationCtx.Value(terminationKey).(*termination).descChan).To(Receive(Equal(TerminationDescriptor{
 				err:      err0,
 				exitCode: 1,
 			})))
@@ -61,9 +63,10 @@ var _ = Describe("graceful core", func() {
 			}()
 			wg.Wait()
 
-			Expect(terminationCtx.Value(terminationKey).(*termination).errChan).To(HaveLen(1))
+			Expect(terminationCtx.Value(terminationKey).(*termination).descChan).To(HaveLen(1))
 		})
 	})
+
 	Describe("IsTerminationContext()", func() {
 		It("should return 'false' if ctx has not termination", func(ctx SpecContext) {
 			Expect(IsTerminationContext(ctx)).To(BeFalse())
@@ -74,6 +77,7 @@ var _ = Describe("graceful core", func() {
 			Expect(IsTerminationContext(terminationCtx)).To(BeTrue())
 		})
 	})
+
 	Describe("IsTerminating()", func() {
 		It("should return 'false' if ctx has termination", func(ctx SpecContext) {
 			Expect(IsTerminating(ctx)).To(BeFalse())
@@ -85,13 +89,12 @@ var _ = Describe("graceful core", func() {
 		})
 		It("should return 'true' if ctx has termination and it is terminated", func(ctx SpecContext) {
 			terminationCtx := WithTermination(ctx)
-			terminationCtx.Value(terminationKey).(*termination).cancel()
+			terminationCtx.Value(terminationKey).(*termination).run(TerminationDescriptor{})
 			Expect(IsTerminating(terminationCtx)).To(BeTrue())
 		})
-		It("should return 'true' if ctx has termination and ctx is wrapped with another one", func(ctx SpecContext) {})
 		It("should be safe for concurrent usage", func(ctx SpecContext) {
 			terminationCtx := WithTermination(ctx)
-			terminationCtx.Value(terminationKey).(*termination).cancel()
+			terminationCtx.Value(terminationKey).(*termination).run(TerminationDescriptor{})
 
 			wg := sync.WaitGroup{}
 			wg.Add(2)
@@ -106,29 +109,18 @@ var _ = Describe("graceful core", func() {
 			wg.Wait()
 		})
 	})
+
 	Describe("Shutdown()", func() {
 		var spyCallback *spyCallbackHelper
 		BeforeEach(func() {
 			spyCallback = &spyCallbackHelper{}
 		})
-		It("should not panic if ctx has not termination", func(ctx SpecContext) {
+		It("should panic if ctx has no termination", func(ctx SpecContext) {
 			Expect(func() {
 				Shutdown(ctx, spyCallback.Method)
 			}).To(PanicWith(MatchRegexp("context is not termination")))
 
 			Expect(spyCallback).To(Equal(&spyCallbackHelper{}))
-		})
-		It("should ensure termination err if termination is in progress", func(ctx SpecContext) {
-			terminationCtx := WithTermination(ctx)
-			terminationCtx.Value(terminationKey).(*termination).cancel()
-
-			Shutdown(terminationCtx, spyCallback.Method)
-
-			Expect(spyCallback).To(Equal(&spyCallbackHelper{
-				callsCount: 1,
-				err:        errors.New("process terminated"),
-				exitCode:   143,
-			}))
 		})
 		It("should handle panic if it happened", func(ctx SpecContext) {
 			panicMsg := "my panic"
@@ -138,35 +130,47 @@ var _ = Describe("graceful core", func() {
 				panic(panicMsg)
 			}).To(Not(Panic()))
 
-			Expect(spyCallback).To(Equal(&spyCallbackHelper{
-				callsCount: 1,
-				err:        errors.New(panicMsg),
-				exitCode:   1,
-			}))
+			Expect(spyCallback.CallsCount).To(Equal(1))
+			Expect(spyCallback.TermDesc.Err()).To(Equal(errors.New(panicMsg)))
+			Expect(spyCallback.TermDesc.ExitCode()).To(Equal(1))
+			Expect(spyCallback.TermDesc.Signal()).To(BeNil())
 		})
-		It("should do nothing if termination is not in progress and no panic", func(ctx SpecContext) {
+		It("should call callback if system signal received", func(ctx SpecContext) {
+			terminationCtx := WithTermination(ctx)
+
+			terminationCtx.Value(terminationKey).(*termination).run(TerminationDescriptor{
+				err:      nil,
+				exitCode: int(syscall.SIGINT) + 128, // SIGINT
+				signal:   syscall.SIGINT,
+			})
+
+			Shutdown(terminationCtx, spyCallback.Method)
+
+			Expect(spyCallback.CallsCount).To(Equal(1))
+			Expect(spyCallback.TermDesc.Err()).To(BeNil())
+			Expect(spyCallback.TermDesc.ExitCode()).To(Equal(int(syscall.SIGINT) + 128))
+			Expect(spyCallback.TermDesc.Signal()).To(Equal(syscall.SIGINT))
+		})
+		It("should call callback even if termination is not in progress", func(ctx SpecContext) {
 			terminationCtx := WithTermination(ctx)
 			Shutdown(terminationCtx, spyCallback.Method)
 
-			Expect(spyCallback).To(Equal(&spyCallbackHelper{
-				callsCount: 0,
-				err:        nil,
-				exitCode:   0,
-			}))
+			Expect(spyCallback.CallsCount).To(Equal(1))
+			Expect(spyCallback.TermDesc.Err()).To(BeNil())
+			Expect(spyCallback.TermDesc.Signal()).To(BeNil())
+			Expect(spyCallback.TermDesc.ExitCode()).To(Equal(0))
 
-			terminationCtx.Value(terminationKey).(*termination).cancel()
+			terminationCtx.Value(terminationKey).(*termination).run(TerminationDescriptor{})
 		})
 	})
 })
 
 type spyCallbackHelper struct {
-	callsCount int
-	err        error
-	exitCode   int
+	CallsCount int
+	TermDesc   TerminationDescriptor
 }
 
-func (s *spyCallbackHelper) Method(err error, exitCode int) {
-	s.callsCount++
-	s.err = err
-	s.exitCode = exitCode
+func (s *spyCallbackHelper) Method(_ context.Context, desc TerminationDescriptor) {
+	s.CallsCount++
+	s.TermDesc = desc
 }
