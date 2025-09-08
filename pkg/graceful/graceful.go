@@ -2,7 +2,6 @@ package graceful
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -34,23 +33,28 @@ func (t *termination) run(desc TerminationDescriptor) {
 }
 
 // listenSystemSignals
-// If system signal is received, it starts termination process translating the signal to termination descriptor.
-// If ctx is marked as done, it stops listening the system signals.
+// Blocks until ctx is done or system signal (SIGINT, SIGTERM) is received.
+// If system signal is received, it starts termination process translating the signal to TerminationDescriptor.
+// When it unblocks it resets system signal handler.
 func (t *termination) listenSystemSignals(ctx context.Context) {
-	listenedSignals := make(chan os.Signal, 1)
-	signal.Notify(listenedSignals, os.Interrupt, syscall.SIGTERM)
+	listenedSignals := []os.Signal{os.Interrupt, syscall.SIGTERM}
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, listenedSignals...)
 
 	// Block until ctx is done or signal received.
 	select {
 	case <-ctx.Done():
-		signal.Stop(listenedSignals)
-	case sig := <-listenedSignals:
+		// do nothing
+	case sig := <-sigChan:
 		t.run(TerminationDescriptor{
 			err:      nil,
 			exitCode: int(sig.(syscall.Signal)) + 128,
 			signal:   sig,
 		})
 	}
+
+	signal.Reset(listenedSignals...)
 }
 
 type TerminationDescriptor struct {
@@ -115,24 +119,17 @@ func IsTerminating(ctx context.Context) bool {
 type ShutdownCallback func(ctx context.Context, desc TerminationDescriptor)
 
 // Shutdown handles termination using terminationCtx. ctx must be the context created WithTermination().
-// If system signal is captured, it translates the signal to termination descriptor.
-// If panic is happened, it translates the panic to termination descriptor.
-// Callback is always called with termination descriptor.
+// Callback is always called.
 func Shutdown(ctx context.Context, callback ShutdownCallback) {
 	term, ok := ctx.Value(terminationKey).(*termination)
 	if !ok {
 		panic("context is not termination")
 	}
 
-	// Translate panic to termination if needed.
-	if r := recover(); r != nil {
-		Terminate(ctx, fmt.Errorf("%v", r), 1)
-	}
-
 	// Unblocking read
 	select {
 	case desc := <-term.descChan:
-		// If TermDesc is exists, pass it to callback.
+		// If TerminationDescriptor is exists, pass it to callback.
 		callback(ctx, desc)
 	default:
 		// If desc is not exists, pass default desc to callback.

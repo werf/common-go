@@ -122,17 +122,17 @@ var _ = Describe("graceful core", func() {
 
 			Expect(spyCallback).To(Equal(&spyCallbackHelper{}))
 		})
-		It("should handle panic if it happened", func(ctx SpecContext) {
+		It("should pass through panic if it happened", func(ctx SpecContext) {
 			panicMsg := "my panic"
 
 			Expect(func() {
 				defer Shutdown(WithTermination(ctx), spyCallback.Method)
 				panic(panicMsg)
-			}).To(Not(Panic()))
+			}).To(Panic())
 
 			Expect(spyCallback.CallsCount).To(Equal(1))
-			Expect(spyCallback.TermDesc.Err()).To(Equal(errors.New(panicMsg)))
-			Expect(spyCallback.TermDesc.ExitCode()).To(Equal(1))
+			Expect(spyCallback.TermDesc.Err()).To(BeNil())
+			Expect(spyCallback.TermDesc.ExitCode()).To(Equal(0))
 			Expect(spyCallback.TermDesc.Signal()).To(BeNil())
 		})
 		It("should call callback if system signal received", func(ctx SpecContext) {
