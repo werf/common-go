@@ -2,7 +2,6 @@ package graceful
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -127,15 +126,10 @@ func Shutdown(ctx context.Context, callback ShutdownCallback) {
 		panic("context is not termination")
 	}
 
-	// Translate panic to termination if needed.
-	if r := recover(); r != nil {
-		Terminate(ctx, fmt.Errorf("%v", r), 1)
-	}
-
 	// Unblocking read
 	select {
 	case desc := <-term.descChan:
-		// If TermDesc is exists, pass it to callback.
+		// If TerminationDescriptor is exists, pass it to callback.
 		callback(ctx, desc)
 	default:
 		// If desc is not exists, pass default desc to callback.
