@@ -10,10 +10,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/go-git/go-git/v5/plumbing"
-	"github.com/go-git/go-git/v5/plumbing/filemode"
-	"github.com/go-git/go-git/v5/plumbing/format/index"
-
 	"github.com/werf/logboek"
 )
 
@@ -106,45 +102,6 @@ func CopyFileIntoTar(tw *tar.Writer, tarEntryName, filePath string) error {
 
 		if _, err := tw.Write(data); err != nil {
 			return fmt.Errorf("unable to write data to tar archive from file %q: %w", filePath, err)
-		}
-	}
-
-	return nil
-}
-
-func CopyGitIndexEntryIntoTar(tw *tar.Writer, tarEntryName string, entry *index.Entry, obj plumbing.EncodedObject) error {
-	r, err := obj.Reader()
-	if err != nil {
-		return err
-	}
-
-	header := &tar.Header{
-		Name:       tarEntryName,
-		Mode:       int64(entry.Mode),
-		Size:       int64(entry.Size),
-		ModTime:    entry.ModifiedAt,
-		AccessTime: entry.ModifiedAt,
-		ChangeTime: entry.ModifiedAt,
-	}
-
-	if entry.Mode == filemode.Symlink {
-		data, err := ioutil.ReadAll(r)
-		if err != nil {
-			return err
-		}
-
-		linkname := string(data)
-		header.Linkname = linkname
-		header.Typeflag = tar.TypeSymlink
-	}
-
-	if err := tw.WriteHeader(header); err != nil {
-		return fmt.Errorf("unable to write tar header for git index entry %s: %w", tarEntryName, err)
-	}
-
-	if entry.Mode.IsFile() {
-		if _, err := io.Copy(tw, r); err != nil {
-			return fmt.Errorf("unable to write data to tar for git index entry %q: %w", tarEntryName, err)
 		}
 	}
 
