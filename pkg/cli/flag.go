@@ -33,11 +33,12 @@ type AddFlagOptions struct {
 	// the --help output.
 	Group *FlagGroup
 
-	Type       FlagType
-	ShortName  string
-	Deprecated bool
-	Hidden     bool
-	Required   bool
+	Type            FlagType
+	ShortName       string
+	Deprecated      bool
+	Hidden          bool
+	Required        bool
+	NoSplitOnCommas bool
 }
 
 // TODO(ilya-lesikov): allow restricted values
@@ -65,7 +66,7 @@ func AddFlag[T any](cmd *cobra.Command, dest *T, name string, defaultValue T, he
 		return fmt.Errorf("build help: %w", err)
 	}
 
-	if err := addFlags(cmd, dest, name, opts.ShortName, defaultValue, help); err != nil {
+	if err := addFlags(cmd, dest, name, opts.ShortName, defaultValue, opts.NoSplitOnCommas, help); err != nil {
 		return fmt.Errorf("add flags: %w", err)
 	}
 
@@ -147,7 +148,7 @@ func buildHelp[T any](help string, dest *T, envVarRegexes []*FlagRegexExpr) (str
 	return help, nil
 }
 
-func addFlags[T any](cmd *cobra.Command, dest *T, name string, shortName string, defaultValue T, help string) error {
+func addFlags[T any](cmd *cobra.Command, dest *T, name string, shortName string, defaultValue T, noSplitOnCommas bool, help string) error {
 	switch dst := any(dest).(type) {
 	case *bool:
 		cmd.Flags().BoolVarP(dst, name, shortName, any(defaultValue).(bool), help)
@@ -156,7 +157,11 @@ func addFlags[T any](cmd *cobra.Command, dest *T, name string, shortName string,
 	case *string:
 		cmd.Flags().StringVarP(dst, name, shortName, any(defaultValue).(string), help)
 	case *[]string:
-		cmd.Flags().StringSliceVarP(dst, name, shortName, any(defaultValue).([]string), help)
+		if noSplitOnCommas {
+			cmd.Flags().StringArrayVarP(dst, name, shortName, any(defaultValue).([]string), help)
+		} else {
+			cmd.Flags().StringSliceVarP(dst, name, shortName, any(defaultValue).([]string), help)
+		}
 	case *map[string]string:
 		cmd.Flags().StringToStringVarP(dst, name, shortName, any(defaultValue).(map[string]string), help)
 	case *time.Duration:
