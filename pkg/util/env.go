@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/samber/lo"
 )
 
 func LookupBoolEnvironment(environmentName string) (*bool, bool) {
@@ -56,6 +58,21 @@ func GetFirstExistingEnvVarAsString(envNames ...string) string {
 	}
 
 	return ""
+}
+
+func GetFirstExistingEnvVarAsInt(envNames ...string) (*int, error) {
+	for _, envName := range envNames {
+		result, err := GetIntEnvVar(envName)
+		if err != nil {
+			return nil, err
+		}
+
+		if result != nil {
+			return lo.ToPtr(int(*result)), nil
+		}
+	}
+
+	return nil, nil
 }
 
 func PredefinedValuesByEnvNamePrefix(envNamePrefix string, envNamePrefixesToExcept ...string) []string {
@@ -113,6 +130,19 @@ func GetIntEnvVar(varName string) (*int64, error) {
 	return nil, nil
 }
 
+func GetIntEnvVarDefault(varName string, defaultValue int) (int, error) {
+	val, err := GetIntEnvVar(varName)
+	if err != nil {
+		return 0, err
+	}
+
+	if val == nil {
+		return defaultValue, nil
+	}
+
+	return int(*val), nil
+}
+
 func GetUint64EnvVar(varName string) (*uint64, error) {
 	if v := os.Getenv(varName); v != "" {
 		vUint, err := strconv.ParseUint(v, 10, 64)
@@ -127,4 +157,20 @@ func GetUint64EnvVar(varName string) (*uint64, error) {
 	}
 
 	return nil, nil
+}
+
+func GetIntEnvVarStrict(varName string) *int64 {
+	valP, err := GetIntEnvVar(varName)
+	if err != nil {
+		panic(fmt.Sprintf("bad %s value: %s", varName, err))
+	}
+	return valP
+}
+
+func GetUint64EnvVarStrict(varName string) *uint64 {
+	valP, err := GetUint64EnvVar(varName)
+	if err != nil {
+		panic(fmt.Sprintf("bad %s value: %s", varName, err))
+	}
+	return valP
 }
