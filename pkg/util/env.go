@@ -1,11 +1,13 @@
 package util
 
 import (
+	"encoding/csv"
 	"fmt"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/samber/lo"
 )
@@ -173,4 +175,52 @@ func GetUint64EnvVarStrict(varName string) *uint64 {
 		panic(fmt.Sprintf("bad %s value: %s", varName, err))
 	}
 	return valP
+}
+
+func GetStringToStringEnvVar(varName string) (map[string]string, error) {
+	result := map[string]string{}
+
+	val := os.Getenv(varName)
+	if val == "" {
+		return result, nil
+	}
+
+	var ss []string
+	n := strings.Count(val, "=")
+	switch n {
+	case 0:
+		return nil, fmt.Errorf("%s must be formatted as key=value", val)
+	case 1:
+		ss = append(ss, strings.Trim(val, `"`))
+	default:
+		r := csv.NewReader(strings.NewReader(val))
+		var err error
+		ss, err = r.Read()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	for _, pair := range ss {
+		kv := strings.SplitN(pair, "=", 2)
+		if len(kv) != 2 {
+			return nil, fmt.Errorf("%s must be formatted as key=value", pair)
+		}
+		result[kv[0]] = kv[1]
+	}
+
+	return result, nil
+}
+
+func GetDurationEnvVar(varName string) (time.Duration, error) {
+	if v := os.Getenv(varName); v != "" {
+		vDuration, err := time.ParseDuration(v)
+		if err != nil {
+			return 0, fmt.Errorf("bad %s variable value %q: %w", varName, v, err)
+		}
+
+		return vDuration, nil
+	}
+
+	return 0, nil
 }
