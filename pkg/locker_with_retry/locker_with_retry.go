@@ -2,6 +2,7 @@ package locker_with_retry
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"time"
 
@@ -18,6 +19,8 @@ type LockerWithRetry struct {
 type LockerWithRetryOptions struct {
 	MaxAcquireAttempts int
 	MaxReleaseAttempts int
+	CustomLogWarnFunc  func(msg string)
+	CustomLogErrFunc   func(msg string)
 }
 
 func NewLockerWithRetry(ctx context.Context, locker lockgate.Locker, opts LockerWithRetryOptions) *LockerWithRetry {
@@ -28,10 +31,15 @@ func (locker *LockerWithRetry) Acquire(lockName string, opts lockgate.AcquireOpt
 	executeWithRetry(locker.Ctx, locker.Options.MaxAcquireAttempts, func() error {
 		acquired, handle, err = locker.Locker.Acquire(lockName, opts)
 		if err != nil {
-			logboek.Context(locker.Ctx).Error().LogF("ERROR: unable to acquire lock %s: %s\n", lockName, err)
+			msg := fmt.Sprintf("ERROR: unable to acquire lock %s: %s\n", lockName, err)
+			if locker.Options.CustomLogErrFunc != nil {
+				locker.Options.CustomLogErrFunc(msg)
+			} else {
+				logboek.Context(locker.Ctx).Error().LogF(msg)
+			}
 		}
 		return err
-	})
+	}, locker.Options)
 
 	return
 }
@@ -40,15 +48,20 @@ func (locker *LockerWithRetry) Release(lock lockgate.LockHandle) (err error) {
 	executeWithRetry(locker.Ctx, locker.Options.MaxAcquireAttempts, func() error {
 		err = locker.Locker.Release(lock)
 		if err != nil {
-			logboek.Context(locker.Ctx).Error().LogF("ERROR: unable to release lock %s %s: %s\n", lock.UUID, lock.LockName, err)
+			msg := fmt.Sprintf("ERROR: unable to release lock %s %s: %s\n", lock.UUID, lock.LockName, err)
+			if locker.Options.CustomLogErrFunc != nil {
+				locker.Options.CustomLogErrFunc(msg)
+			} else {
+				logboek.Context(locker.Ctx).Error().LogF(msg)
+			}
 		}
 		return err
-	})
+	}, locker.Options)
 
 	return
 }
 
-func executeWithRetry(ctx context.Context, maxAttempts int, executeFunc func() error) {
+func executeWithRetry(ctx context.Context, maxAttempts int, executeFunc func() error, opts LockerWithRetryOptions) {
 	attempt := 1
 
 executeAttempt:
@@ -58,7 +71,12 @@ executeAttempt:
 		}
 
 		seconds := rand.Intn(10) // from 0 to 10 seconds
-		logboek.Context(ctx).Warn().LogF("Retrying in %d seconds (%d/%d) ...\n", seconds, attempt, maxAttempts)
+		msg := fmt.Sprintf("Retrying in %d seconds (%d/%d) ...\n", seconds, attempt, maxAttempts)
+		if opts.CustomLogWarnFunc != nil {
+			opts.CustomLogWarnFunc(msg)
+		} else {
+			logboek.Context(ctx).Warn().LogF(msg)
+		}
 		time.Sleep(time.Duration(seconds) * time.Second)
 
 		attempt += 1

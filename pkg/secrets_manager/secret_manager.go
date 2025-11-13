@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/werf/common-go/pkg/secret"
-	"github.com/werf/logboek"
 )
 
 var Manager *SecretsManager = NewSecretsManager()
@@ -36,11 +35,9 @@ func (manager *SecretsManager) AllowMissedSecretKeyMode(workingDir string) error
 
 func (manager *SecretsManager) GetYamlEncoder(ctx context.Context, workingDir string, noDecryptSecrets bool) (*secret.YamlEncoder, error) {
 	if noDecryptSecrets {
-		logboek.Context(ctx).Default().LogLnDetails("Secrets decryption disabled")
 		return secret.NewYamlEncoder(nil), nil
 	}
 	if manager.missedSecretKeyModeEnabled {
-		logboek.Context(ctx).Error().LogLn("Secrets decryption disabled due to missed key (no WERF_SECRET_KEY is set)")
 		return secret.NewYamlEncoder(nil), nil
 	}
 
