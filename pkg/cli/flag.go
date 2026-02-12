@@ -41,11 +41,11 @@ type AddFlagOptions struct {
 	NoSplitOnCommas bool
 }
 
-// TODO(ilya-lesikov): allow restricted values
-// TODO(ilya-lesikov): allow showing restricted values in usage
-// TODO(ilya-lesikov): pass examples separately from help
-// TODO(ilya-lesikov): allow for []string with no comma-separated values (pflag.StringArrayVar?)
-// TODO(ilya-lesikov): allow for map[string]string with no comma-separated values
+// TODO: allow restricted values
+// TODO: allow showing restricted values in usage
+// TODO: pass examples separately from help
+// TODO: allow for []string with no comma-separated values (pflag.StringArrayVar?)
+// TODO: allow for map[string]string with no comma-separated values
 
 // Create and bind a flag to the Cobra command. Corresponding environment variables (if enabled)
 // parsed and the value is assigned to the flag immediately. Flag value type inferred from
