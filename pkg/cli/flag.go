@@ -208,8 +208,8 @@ func processEnvVars[T any](cmd *cobra.Command, envVarRegexExprs []*FlagRegexExpr
 	switch dst := any(dest).(type) {
 	case *bool, *int, *string, *time.Duration:
 	envirLoop:
-		for key, val := range envir {
-			for _, regexExpr := range envVarRegexExprs {
+		for _, regexExpr := range envVarRegexExprs {
+			for key, val := range envir {
 				if !definedFlagEnvVarRegexes[*regexExpr].MatchString(key) || val == "" {
 					continue
 				}
