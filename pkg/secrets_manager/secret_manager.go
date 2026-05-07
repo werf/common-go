@@ -9,35 +9,14 @@ import (
 
 var Manager *SecretsManager = NewSecretsManager()
 
-type SecretsManager struct {
-	missedSecretKeyModeEnabled bool
-}
+type SecretsManager struct{}
 
 func NewSecretsManager() *SecretsManager {
 	return &SecretsManager{}
 }
 
-func (manager *SecretsManager) IsMissedSecretKeyModeEnabled() bool {
-	return manager.missedSecretKeyModeEnabled
-}
-
-func (manager *SecretsManager) AllowMissedSecretKeyMode(workingDir string) error {
-	_, err := GetRequiredSecretKey(workingDir)
-	if err != nil {
-		if _, missedKey := err.(*EncryptionKeyRequiredError); missedKey {
-			manager.missedSecretKeyModeEnabled = true
-			return nil
-		}
-		return fmt.Errorf("unable to load secret key: %w", err)
-	}
-	return nil
-}
-
 func (manager *SecretsManager) GetYamlEncoder(ctx context.Context, workingDir string, noDecryptSecrets bool) (*secret.YamlEncoder, error) {
 	if noDecryptSecrets {
-		return secret.NewYamlEncoder(nil), nil
-	}
-	if manager.missedSecretKeyModeEnabled {
 		return secret.NewYamlEncoder(nil), nil
 	}
 
