@@ -3,6 +3,7 @@ package secret
 import (
 	"bytes"
 	"crypto/aes"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -42,7 +43,7 @@ func TestAesEncoderShortPlaintextRoundTrip(t *testing.T) {
 			}
 
 			if binarySize := hex.DecodedLen(len(encodedData)); binarySize >= legacyCBCMinimumDataBinarySize() {
-				t.Logf("ciphertext is %d binary bytes, legacy minimum is %d", binarySize, legacyCBCMinimumDataBinarySize())
+				t.Errorf("ciphertext is %d binary bytes, at or above the legacy minimum of %d, so this no longer exercises a below-minimum ciphertext", binarySize, legacyCBCMinimumDataBinarySize())
 			}
 
 			result, err := s.Decrypt(encodedData)
@@ -88,6 +89,40 @@ func TestAesEncoderRejectsEveryBitFlip(t *testing.T) {
 				t.Fatalf("tampered ciphertext accepted: byte %d bit %d", bytePos, bit)
 			}
 		}
+	}
+}
+
+// Rewriting the version prefix of a version-2 ciphertext to the legacy one routes it to
+// the CBC reader, which does not authenticate. The length check rejects that outright
+// unless the blob happens to suit CBC, and the hardened unpad rejects almost all of the
+// rest. This pins the deterministic half; the residual is documented in doc.go.
+func TestAesEncoderRejectsVersionDowngrade(t *testing.T) {
+	s, err := NewAesEncoder(AesSecretKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, plainText := range []string{"a", "ab", "abc", "abcde", "value", "a longer secret value"} {
+		t.Run(plainText, func(t *testing.T) {
+			encodedData, err := s.Encrypt([]byte(plainText))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			raw, err := hexToBinary(encodedData)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			binary.LittleEndian.PutUint16(raw[:formatVersionSize], formatVersionLegacyCBC)
+
+			downgraded := make([]byte, hex.EncodedLen(len(raw)))
+			hex.Encode(downgraded, raw)
+
+			if _, err := s.Decrypt(downgraded); err == nil {
+				t.Error("a version-downgraded ciphertext was accepted")
+			}
+		})
 	}
 }
 

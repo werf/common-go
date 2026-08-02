@@ -37,6 +37,16 @@
 // accepted. AES-GCM authenticates, so tampering and wrong keys are reported as errors.
 // This protects newly written values only; existing values gain it once re-encrypted.
 //
+// The version prefix of a version 2 value is authenticated, so it cannot be altered
+// within that format. It cannot be bound any tighter than that: rewriting the prefix to
+// 16 sends the value to the legacy CBC reader, which by definition does not authenticate.
+// Such a value is still rejected unless its length happens to suit CBC and the decrypted
+// tail happens to form valid padding, and the result is unpredictable garbage rather than
+// anything the attacker chooses, since they do not hold the key. Removing this last gap
+// means dropping the ability to read legacy values, which is exactly what must not break.
+// Re-encrypting a repository with rotate-secret-key does not close it either, because the
+// legacy reader has to stay for as long as any legacy value might exist.
+//
 // # YAML scalars
 //
 // EncryptYamlData and DecryptYamlData encrypt each scalar leaf of a document in place.

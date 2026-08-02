@@ -75,7 +75,10 @@ func (s *AesEncoder) Encrypt(data []byte) ([]byte, error) {
 		return nil, fmt.Errorf("read random nonce: %w", err)
 	}
 
-	args = gcm.Seal(args, nonce, data, nil)
+	// The version prefix is authenticated so that it cannot be altered within this
+	// format. It cannot stop a rewrite to the legacy version, which routes to the
+	// unauthenticated CBC reader instead; see the package documentation.
+	args = gcm.Seal(args, nonce, data, args[:formatVersionSize])
 
 	result := make([]byte, hex.EncodedLen(len(args)))
 	hex.Encode(result, args)
@@ -150,7 +153,7 @@ func (s *AesEncoder) decryptAesGCM(dataToExtract []byte) ([]byte, error) {
 	nonce := dataToExtract[formatVersionSize : formatVersionSize+gcmNonceSize]
 	cipherText := dataToExtract[formatVersionSize+gcmNonceSize:]
 
-	result, err := gcm.Open(nil, nonce, cipherText, nil)
+	result, err := gcm.Open(nil, nonce, cipherText, dataToExtract[:formatVersionSize])
 	if err != nil {
 		return nil, errAuthenticationFailed
 	}
