@@ -40,12 +40,18 @@
 // The version prefix of a version 2 value is authenticated, so it cannot be altered
 // within that format. It cannot be bound any tighter than that: rewriting the prefix to
 // 16 sends the value to the legacy CBC reader, which by definition does not authenticate.
-// Such a value is still rejected unless its length happens to suit CBC and the decrypted
-// tail happens to form valid padding, and the result is unpredictable garbage rather than
-// anything the attacker chooses, since they do not hold the key. Removing this last gap
-// means dropping the ability to read legacy values, which is exactly what must not break.
-// Re-encrypting a repository with rotate-secret-key does not close it either, because the
-// legacy reader has to stay for as long as any legacy value might exist.
+// Such a value is still rejected unless its length happens to suit the legacy block
+// layout and the decrypted tail happens to form valid padding, and what comes out is
+// unpredictable garbage rather than anything the attacker chooses, since they do not hold
+// the key.
+//
+// This grants an attacker nothing they did not already have. Anyone able to rewrite those
+// two bytes can just as easily replace the whole value with a legacy blob of their own,
+// which this package must keep reading, and that succeeds at the same small rate. The
+// exposure is not the rewrite but the fact that an unauthenticated format stays readable,
+// and that is the price of not breaking existing data. Re-encrypting with
+// rotate-secret-key does not change it either, because the legacy reader has to stay for
+// as long as any legacy value might exist anywhere.
 //
 // # YAML scalars
 //

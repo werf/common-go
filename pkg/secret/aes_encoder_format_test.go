@@ -92,10 +92,62 @@ func TestAesEncoderRejectsEveryBitFlip(t *testing.T) {
 	}
 }
 
+// A version-2 container whose plaintext length is 4 modulo 16 also satisfies the legacy
+// block layout, so a rewritten prefix reaches the CBC reader instead of being rejected on
+// shape alone. That reader cannot authenticate, so a small fraction of attempts is
+// accepted. What must hold is that such an attempt never yields the protected plaintext:
+// the attacker has no key, so anything accepted is unpredictable garbage.
+func TestAesEncoderDowngradeNeverRevealsPlaintext(t *testing.T) {
+	s, err := NewAesEncoder(AesSecretKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	plainText := []byte("s3cr")
+	if len(plainText)%aes.BlockSize != 4 {
+		t.Fatalf("this test needs a plaintext length of 4 modulo 16 to reach the legacy reader, got %d", len(plainText))
+	}
+
+	const trials = 2000
+	accepted := 0
+
+	for i := 0; i < trials; i++ {
+		encodedData, err := s.Encrypt(plainText)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		raw, err := hexToBinary(encodedData)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		binary.LittleEndian.PutUint16(raw[:formatVersionSize], formatVersionLegacyCBC)
+
+		downgraded := make([]byte, hex.EncodedLen(len(raw)))
+		hex.Encode(downgraded, raw)
+
+		result, err := s.Decrypt(downgraded)
+		if err != nil {
+			continue
+		}
+
+		accepted++
+		if bytes.Equal(result, plainText) {
+			t.Fatal("a downgraded ciphertext revealed the protected plaintext")
+		}
+	}
+
+	// The expected rate is well under 1%; this only guards against the legacy reader
+	// turning permissive, not against the inherent gap itself.
+	if accepted*100 > trials*5 {
+		t.Errorf("legacy reader accepted %d of %d downgraded ciphertexts, far above the expected rate", accepted, trials)
+	}
+}
+
 // Rewriting the version prefix of a version-2 ciphertext to the legacy one routes it to
-// the CBC reader, which does not authenticate. The length check rejects that outright
-// unless the blob happens to suit CBC, and the hardened unpad rejects almost all of the
-// rest. This pins the deterministic half; the residual is documented in doc.go.
+// the CBC reader, which does not authenticate. For every plaintext length that does not
+// suit the legacy block layout the rewrite is rejected outright, deterministically.
 func TestAesEncoderRejectsVersionDowngrade(t *testing.T) {
 	s, err := NewAesEncoder(AesSecretKey)
 	if err != nil {
