@@ -480,3 +480,24 @@ hosts:
 		}),
 	)
 })
+
+var _ = Describe("MergeEncodedYaml scalar metadata", func() {
+	DescribeTable("reuse the old encoded value only when the value, the tag and the style are all unchanged",
+		func(oldData, newData, expectedResult string) {
+			const oldEncodedData = "v: OLD\n"
+			const newEncodedData = "v: NEW\n"
+
+			res, err := MergeEncodedYaml([]byte(oldData), []byte(newData), []byte(oldEncodedData), []byte(newEncodedData))
+			Expect(err).To(Succeed())
+			Expect(string(res)).To(Equal(expectedResult))
+		},
+		Entry("nothing changed", "v: 123\n", "v: 123\n", "v: OLD\n"),
+		Entry("value changed", "v: 123\n", "v: 124\n", "v: NEW\n"),
+		Entry("type changed from string to integer", "v: \"123\"\n", "v: 123\n", "v: NEW\n"),
+		Entry("type changed from integer to string", "v: 123\n", "v: \"123\"\n", "v: NEW\n"),
+		Entry("style changed from folded block to plain", "v: >-\n  hi\n", "v: hi\n", "v: NEW\n"),
+		Entry("style changed from plain to folded block", "v: hi\n", "v: >-\n  hi\n", "v: NEW\n"),
+		Entry("style changed from plain to double quoted", "v: hi\n", "v: \"hi\"\n", "v: NEW\n"),
+		Entry("explicit and implicit string tags are equal", "v: hi\n", "v: hi\n", "v: OLD\n"),
+	)
+})
