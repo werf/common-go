@@ -19,6 +19,11 @@ const (
 
 	formatVersionSize = 2
 	gcmNonceSize      = 12
+
+	// The sealed data ends with one byte holding how much filler precedes it, which lets
+	// the container size dodge the legacy layout. See fillerSizeFor.
+	gcmFillerSizeLen = 1
+	gcmMaxFillerSize = 1
 )
 
 var (
@@ -75,10 +80,8 @@ func (s *AesEncoder) Encrypt(data []byte) ([]byte, error) {
 		return nil, fmt.Errorf("read random nonce: %w", err)
 	}
 
-	// The version prefix is authenticated so that it cannot be altered within this
-	// format. It cannot stop a rewrite to the legacy version, which routes to the
-	// unauthenticated CBC reader instead; see the package documentation.
-	args = gcm.Seal(args, nonce, data, args[:formatVersionSize])
+	// The version prefix is authenticated so that it cannot be altered within this format.
+	args = gcm.Seal(args, nonce, sealedPlainText(data, gcm.Overhead()), args[:formatVersionSize])
 
 	result := make([]byte, hex.EncodedLen(len(args)))
 	hex.Encode(result, args)
@@ -145,7 +148,7 @@ func (s *AesEncoder) decryptAesGCM(dataToExtract []byte) ([]byte, error) {
 		return nil, fmt.Errorf("initialize aes-gcm: %w", err)
 	}
 
-	minimumDataBinarySize := formatVersionSize + gcmNonceSize + gcm.Overhead()
+	minimumDataBinarySize := gcmContainerSize(0, 0, gcm.Overhead())
 	if len(dataToExtract) < minimumDataBinarySize {
 		return nil, minimumDataLengthError(minimumDataBinarySize)
 	}
@@ -158,7 +161,52 @@ func (s *AesEncoder) decryptAesGCM(dataToExtract []byte) ([]byte, error) {
 		return nil, errAuthenticationFailed
 	}
 
-	return result, nil
+	return unfill(result)
+}
+
+// A container whose size matches the legacy layout could be handed to the CBC reader by
+// rewriting its version prefix, and that reader cannot authenticate. Padding the sealed
+// data by one byte in exactly those cases keeps every version-2 container off the legacy
+// grid, so such a rewrite always fails on size alone.
+func sealedPlainText(data []byte, overhead int) []byte {
+	filler := fillerSizeFor(len(data), overhead)
+
+	result := make([]byte, 0, len(data)+filler+gcmFillerSizeLen)
+	result = append(result, data...)
+	result = append(result, bytes.Repeat([]byte{0}, filler)...)
+	result = append(result, byte(filler))
+
+	return result
+}
+
+func fillerSizeFor(dataSize, overhead int) int {
+	if matchesLegacyLayout(gcmContainerSize(dataSize, 0, overhead)) {
+		return 1
+	}
+
+	return 0
+}
+
+func gcmContainerSize(dataSize, filler, overhead int) int {
+	return formatVersionSize + gcmNonceSize + dataSize + filler + gcmFillerSizeLen + overhead
+}
+
+func matchesLegacyLayout(containerSize int) bool {
+	return containerSize >= legacyCBCMinimumDataBinarySize() &&
+		(containerSize-formatVersionSize-aes.BlockSize)%aes.BlockSize == 0
+}
+
+func unfill(sealed []byte) ([]byte, error) {
+	if len(sealed) < gcmFillerSizeLen {
+		return nil, errAuthenticationFailed
+	}
+
+	filler := int(sealed[len(sealed)-1])
+	if filler > gcmMaxFillerSize || len(sealed) < filler+gcmFillerSizeLen {
+		return nil, errAuthenticationFailed
+	}
+
+	return sealed[:len(sealed)-filler-gcmFillerSizeLen], nil
 }
 
 func legacyCBCMinimumDataBinarySize() int {

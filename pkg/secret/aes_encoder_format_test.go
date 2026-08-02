@@ -42,8 +42,8 @@ func TestAesEncoderShortPlaintextRoundTrip(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if binarySize := hex.DecodedLen(len(encodedData)); binarySize >= legacyCBCMinimumDataBinarySize() {
-				t.Errorf("ciphertext is %d binary bytes, at or above the legacy minimum of %d, so this no longer exercises a below-minimum ciphertext", binarySize, legacyCBCMinimumDataBinarySize())
+			if plainText == "" && hex.DecodedLen(len(encodedData)) >= legacyCBCMinimumDataBinarySize() {
+				t.Errorf("the smallest ciphertext is %d binary bytes, at or above the legacy minimum of %d, so this no longer exercises a below-minimum ciphertext", hex.DecodedLen(len(encodedData)), legacyCBCMinimumDataBinarySize())
 			}
 
 			result, err := s.Decrypt(encodedData)
@@ -92,26 +92,38 @@ func TestAesEncoderRejectsEveryBitFlip(t *testing.T) {
 	}
 }
 
-// A version-2 container whose plaintext length is 4 modulo 16 also satisfies the legacy
-// block layout, so a rewritten prefix reaches the CBC reader instead of being rejected on
-// shape alone. That reader cannot authenticate, so a small fraction of attempts is
-// accepted. What must hold is that such an attempt never yields the protected plaintext:
-// the attacker has no key, so anything accepted is unpredictable garbage.
-func TestAesEncoderDowngradeNeverRevealsPlaintext(t *testing.T) {
+// No version-2 container may ever sit on the legacy block grid, otherwise rewriting its
+// version prefix would hand it to the CBC reader, which cannot authenticate.
+func TestAesEncoderContainerNeverMatchesLegacyLayout(t *testing.T) {
 	s, err := NewAesEncoder(AesSecretKey)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	plainText := []byte("s3cr")
-	if len(plainText)%aes.BlockSize != 4 {
-		t.Fatalf("this test needs a plaintext length of 4 modulo 16 to reach the legacy reader, got %d", len(plainText))
+	for dataSize := 0; dataSize <= 200; dataSize++ {
+		encodedData, err := s.Encrypt(make([]byte, dataSize))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		containerSize := hex.DecodedLen(len(encodedData))
+		if matchesLegacyLayout(containerSize) {
+			t.Errorf("a %d-byte plaintext produced a %d-byte container, which the legacy reader would parse", dataSize, containerSize)
+		}
+	}
+}
+
+// Because no container sits on the legacy grid, rewriting the version prefix is now
+// rejected for every plaintext length rather than only for most of them.
+func TestAesEncoderRejectsVersionDowngrade(t *testing.T) {
+	s, err := NewAesEncoder(AesSecretKey)
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	const trials = 2000
-	accepted := 0
+	for dataSize := 0; dataSize <= 200; dataSize++ {
+		plainText := bytes.Repeat([]byte("s"), dataSize)
 
-	for i := 0; i < trials; i++ {
 		encodedData, err := s.Encrypt(plainText)
 		if err != nil {
 			t.Fatal(err)
@@ -127,54 +139,9 @@ func TestAesEncoderDowngradeNeverRevealsPlaintext(t *testing.T) {
 		downgraded := make([]byte, hex.EncodedLen(len(raw)))
 		hex.Encode(downgraded, raw)
 
-		result, err := s.Decrypt(downgraded)
-		if err != nil {
-			continue
+		if _, err := s.Decrypt(downgraded); err == nil {
+			t.Fatalf("a version-downgraded ciphertext of a %d-byte plaintext was accepted", dataSize)
 		}
-
-		accepted++
-		if bytes.Equal(result, plainText) {
-			t.Fatal("a downgraded ciphertext revealed the protected plaintext")
-		}
-	}
-
-	// The expected rate is well under 1%; this only guards against the legacy reader
-	// turning permissive, not against the inherent gap itself.
-	if accepted*100 > trials*5 {
-		t.Errorf("legacy reader accepted %d of %d downgraded ciphertexts, far above the expected rate", accepted, trials)
-	}
-}
-
-// Rewriting the version prefix of a version-2 ciphertext to the legacy one routes it to
-// the CBC reader, which does not authenticate. For every plaintext length that does not
-// suit the legacy block layout the rewrite is rejected outright, deterministically.
-func TestAesEncoderRejectsVersionDowngrade(t *testing.T) {
-	s, err := NewAesEncoder(AesSecretKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for _, plainText := range []string{"a", "ab", "abc", "abcde", "value", "a longer secret value"} {
-		t.Run(plainText, func(t *testing.T) {
-			encodedData, err := s.Encrypt([]byte(plainText))
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			raw, err := hexToBinary(encodedData)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			binary.LittleEndian.PutUint16(raw[:formatVersionSize], formatVersionLegacyCBC)
-
-			downgraded := make([]byte, hex.EncodedLen(len(raw)))
-			hex.Encode(downgraded, raw)
-
-			if _, err := s.Decrypt(downgraded); err == nil {
-				t.Error("a version-downgraded ciphertext was accepted")
-			}
-		})
 	}
 }
 
