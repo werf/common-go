@@ -9,6 +9,14 @@
 //	version 16: [version][16-byte IV][AES-CBC ciphertext, PKCS#7 padded]
 //	version  2: [version][12-byte nonce][AES-GCM ciphertext and authentication tag]
 //
+// What version 2 seals is not the value on its own but:
+//
+//	[value][filler, 0 or 1 zero bytes][one byte holding the filler size]
+//
+// The filler is present only when the container would otherwise be the size of a legacy
+// container, and exists purely to keep the two formats apart; see Authentication below.
+// It is inside the sealed data, so it is authenticated along with the value.
+//
 // Version 16 is the legacy format. Those two bytes originally held the CBC IV size, were
 // always written as 16, and were never read back, which is why the field could be
 // repurposed as a version without changing the layout of existing data. It is read-only:
@@ -38,20 +46,21 @@
 // This protects newly written values only; existing values gain it once re-encrypted.
 //
 // The version prefix of a version 2 value is authenticated, so it cannot be altered
-// within that format. It cannot be bound any tighter than that: rewriting the prefix to
-// 16 sends the value to the legacy CBC reader, which by definition does not authenticate.
-// Such a value is still rejected unless its length happens to suit the legacy block
-// layout and the decrypted tail happens to form valid padding, and what comes out is
-// unpredictable garbage rather than anything the attacker chooses, since they do not hold
-// the key.
+// within that format. On its own that would not be enough, because rewriting the prefix
+// to 16 hands the value to the legacy CBC reader, which by definition does not
+// authenticate and would never consult it. That is what the filler is for: a version 2
+// container is never the size of a legacy one, so a rewritten prefix always fails the
+// legacy size and block checks. Such a value is rejected outright, for every possible
+// value length, rather than merely most of the time.
 //
-// This grants an attacker nothing they did not already have. Anyone able to rewrite those
-// two bytes can just as easily replace the whole value with a legacy blob of their own,
-// which this package must keep reading, and that succeeds at the same small rate. The
-// exposure is not the rewrite but the fact that an unauthenticated format stays readable,
-// and that is the price of not breaking existing data. Re-encrypting with
-// rotate-secret-key does not change it either, because the legacy reader has to stay for
-// as long as any legacy value might exist anywhere.
+// What remains is that the legacy format itself stays readable. Anyone able to rewrite
+// those two bytes can instead replace the whole value with a legacy blob of their own,
+// and that has a small chance of being accepted, returning unpredictable garbage rather
+// than anything they choose, since they do not hold the key. So the exposure is the
+// readable unauthenticated format, not any particular way of reaching it, and that is the
+// price of not breaking existing data. Re-encrypting with rotate-secret-key does not
+// change it either, because the legacy reader has to stay for as long as any legacy value
+// might exist anywhere.
 //
 // # YAML scalars
 //
