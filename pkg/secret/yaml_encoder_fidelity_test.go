@@ -118,6 +118,40 @@ var _ = Describe("YamlEncoder scalar fidelity", func() {
 		Expect(root["items"]).To(Equal([]interface{}{1, "two", 3.5}))
 	})
 
+	It("leaves values untouched and unframed without an encoder", func() {
+		data := "v: 0200abcdef\n"
+
+		decrypted, err := NewYamlEncoder(nil).DecryptYamlData([]byte(data))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(decrypted)).To(Equal(data))
+	})
+
+	It("does not frame a whole blob, so a secret file round trips unchanged", func() {
+		aesEncoder, err := NewAesEncoder(AesSecretKey)
+		Expect(err).NotTo(HaveOccurred())
+
+		content := "line1\nline2\n"
+
+		encoded, err := aesEncoder.Encrypt([]byte(content))
+		Expect(err).NotTo(HaveOccurred())
+
+		decoded, err := aesEncoder.Decrypt(encoded)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(decoded)).To(Equal(content))
+		Expect(string(decoded)).NotTo(ContainSubstring(string([]byte{scalarFrameSeparator})))
+	})
+
+	It("reports an unframed payload found in a YAML value instead of corrupting it", func() {
+		aesEncoder, err := NewAesEncoder(AesSecretKey)
+		Expect(err).NotTo(HaveOccurred())
+
+		blob, err := aesEncoder.Encrypt([]byte("no framing here"))
+		Expect(err).NotTo(HaveOccurred())
+
+		_, err = NewYamlEncoder(aesEncoder).DecryptYamlData([]byte("v: " + string(blob) + "\n"))
+		Expect(err).To(MatchError(ContainSubstring("malformed encrypted scalar payload")))
+	})
+
 	It("still decrypts a legacy ciphertext as a plain string", func() {
 		legacyEncoder, err := NewAesEncoder(legacyFixtureKey)
 		Expect(err).NotTo(HaveOccurred())
