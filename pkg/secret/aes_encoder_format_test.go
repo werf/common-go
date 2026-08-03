@@ -92,29 +92,13 @@ func TestAesEncoderRejectsEveryBitFlip(t *testing.T) {
 	}
 }
 
-// No version-2 container may ever sit on the legacy block grid, otherwise rewriting its
-// version prefix would hand it to the CBC reader, which cannot authenticate.
-func TestAesEncoderContainerNeverMatchesLegacyLayout(t *testing.T) {
-	s, err := NewAesEncoder(AesSecretKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for dataSize := 0; dataSize <= 200; dataSize++ {
-		encodedData, err := s.Encrypt(make([]byte, dataSize))
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		containerSize := hex.DecodedLen(len(encodedData))
-		if matchesLegacyLayout(containerSize) {
-			t.Errorf("a %d-byte plaintext produced a %d-byte container, which the legacy reader would parse", dataSize, containerSize)
-		}
-	}
-}
-
 // Because no container sits on the legacy grid, rewriting the version prefix is now
 // rejected for every plaintext length rather than only for most of them.
+//
+// The rejection must come from the size or block check, never from unpad: reaching unpad
+// would mean the blob was decrypted with an unauthenticated key stream first, and whether
+// that lands on valid padding is a matter of chance. Asserting only that some error came
+// back would accept that outcome roughly 995 times out of 1000 and hide the regression.
 func TestAesEncoderRejectsVersionDowngrade(t *testing.T) {
 	s, err := NewAesEncoder(AesSecretKey)
 	if err != nil {
@@ -139,8 +123,13 @@ func TestAesEncoderRejectsVersionDowngrade(t *testing.T) {
 		downgraded := make([]byte, hex.EncodedLen(len(raw)))
 		hex.Encode(downgraded, raw)
 
-		if _, err := s.Decrypt(downgraded); err == nil {
+		_, err = s.Decrypt(downgraded)
+		if err == nil {
 			t.Fatalf("a version-downgraded ciphertext of a %d-byte plaintext was accepted", dataSize)
+		}
+
+		if !errors.Is(err, errMinimumDataLength) && !errors.Is(err, errBlockSizeMultiple) {
+			t.Fatalf("a version-downgraded ciphertext of a %d-byte plaintext reached the legacy key stream instead of failing on shape: %v", dataSize, err)
 		}
 	}
 }
