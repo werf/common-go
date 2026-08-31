@@ -3,6 +3,7 @@ package secret
 import (
 	"bytes"
 	"crypto/aes"
+	"crypto/cipher"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
@@ -134,6 +135,54 @@ func TestAesEncoderRejectsVersionDowngrade(t *testing.T) {
 	}
 }
 
+func TestAesEncoderRejectsNonCanonicalFiller(t *testing.T) {
+	s, err := NewAesEncoder(AesSecretKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, test := range []struct {
+		name   string
+		sealed []byte
+	}{
+		{name: "missing required filler", sealed: []byte("abc\x00")},
+		{name: "missing required filler at the next legacy layout", sealed: append(bytes.Repeat([]byte("a"), 19), 0)},
+		{name: "nonzero filler", sealed: []byte("abc\xff\x01")},
+		{name: "unnecessary zero filler", sealed: []byte("abcd\x00\x01")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := s.Decrypt(aesGCMEncoded(t, s, test.sealed))
+			if !errors.Is(err, errAuthenticationFailed) {
+				t.Fatalf("expected an authentication failure, got: %v", err)
+			}
+		})
+	}
+}
+
+func aesGCMEncoded(t *testing.T, s *AesEncoder, sealed []byte) []byte {
+	t.Helper()
+
+	gcm, err := cipher.NewGCM(s.CipherBlock)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	raw := make([]byte, formatVersionSize+gcm.NonceSize())
+	binary.LittleEndian.PutUint16(raw[:formatVersionSize], formatVersionAesGCM)
+
+	nonce := raw[formatVersionSize:]
+	for i := range nonce {
+		nonce[i] = byte(i)
+	}
+
+	raw = gcm.Seal(raw, nonce, sealed, raw[:formatVersionSize])
+
+	encoded := make([]byte, hex.EncodedLen(len(raw)))
+	hex.Encode(encoded, raw)
+
+	return encoded
+}
+
 func TestAesEncoderRejectsWrongKey(t *testing.T) {
 	s, err := NewAesEncoder(AesSecretKey)
 	if err != nil {
@@ -171,14 +220,14 @@ func TestAesEncoderRejectsUnsupportedFormatVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	unsupported := append([]byte("0300"), encodedData[4:]...)
+	unsupported := append([]byte("0400"), encodedData[4:]...)
 
 	_, err = s.Decrypt(unsupported)
 	if !errors.Is(err, errUnsupportedFormatVersion) {
 		t.Fatalf("expected an unsupported version error, got: %v", err)
 	}
 
-	if !strings.Contains(err.Error(), "3") {
+	if !strings.Contains(err.Error(), "4") {
 		t.Errorf("expected the rejected version in the message, got: %v", err)
 	}
 

@@ -7,9 +7,10 @@
 // little-endian format version:
 //
 //	version 16: [version][16-byte IV][AES-CBC ciphertext, PKCS#7 padded]
-//	version  2: [version][12-byte nonce][AES-GCM ciphertext and authentication tag]
+//	version  2: [version][12-byte nonce][AES-GCM whole-blob ciphertext and authentication tag]
+//	version  3: [version][12-byte nonce][AES-GCM YAML scalar ciphertext and authentication tag]
 //
-// What version 2 seals is not the value on its own but:
+// What each AES-GCM format seals is not the value on its own but:
 //
 //	[value][filler, 0 or 1 zero bytes][one byte holding the filler size]
 //
@@ -22,21 +23,22 @@
 // repurposed as a version without changing the layout of existing data. It is read-only:
 // it still decrypts exactly as it always did, but it is never written any more.
 //
-// Version 2 is AES-GCM and is what Encrypt writes. Any other version is rejected with an
-// error rather than being decrypted as CBC.
+// Version 2 is AES-GCM and is what whole-blob Encrypt writes. EncryptYamlData writes
+// version 3, whose plaintext also holds the scalar metadata. Any other version is rejected
+// with an error rather than being decrypted as CBC.
 //
-// Both versions are read with the same secret key, so upgrading needs no new key and no
+// Both AES-GCM versions are read with the same secret key, so upgrading needs no new key and no
 // migration. The key format is unchanged: 16, 24 or 32 random bytes hex-encoded, as
 // produced by GenerateAesSecretKey.
 //
 // # Compatibility
 //
 // Reading is backward compatible, but writing is not forward compatible: a value written
-// in version 2 cannot be read by a werf or nelm release that predates version 2 support,
+// in version 2 or 3 cannot be read by a werf or nelm release that predates AES-GCM support,
 // because those releases ignore the version field and decrypt everything as CBC. There is
 // no way to write the legacy format any more, so a repository whose secrets have been
 // re-encrypted needs every consumer, including CI jobs and saved deploy plans, to
-// understand version 2. Re-encrypting everything at once is what rotate-secret-key does.
+// understand AES-GCM formats. Re-encrypting everything at once is what rotate-secret-key does.
 //
 // # Authentication
 //
@@ -45,10 +47,10 @@
 // accepted. AES-GCM authenticates, so tampering and wrong keys are reported as errors.
 // This protects newly written values only; existing values gain it once re-encrypted.
 //
-// The version prefix of a version 2 value is authenticated, so it cannot be altered
-// within that format. On its own that would not be enough, because rewriting the prefix
+// The version prefix of an AES-GCM value is authenticated, so it cannot be altered within
+// that format. On its own that would not be enough, because rewriting the prefix
 // to 16 hands the value to the legacy CBC reader, which by definition does not
-// authenticate and would never consult it. That is what the filler is for: a version 2
+// authenticate and would never consult it. That is what the filler is for: an AES-GCM
 // container is never the size of a legacy one, so a rewritten prefix always fails the
 // legacy size and block checks. Such a value is rejected outright, for every possible
 // value length, rather than merely most of the time.
@@ -65,11 +67,11 @@
 // # YAML scalars
 //
 // EncryptYamlData and DecryptYamlData encrypt each scalar leaf of a document in place.
-// From version 2 on, the YAML tag and the scalar style are stored inside the encrypted
+// From version 3 on, the YAML tag and the scalar style are stored inside the encrypted
 // payload, so a number stays a number and a block scalar keeps its style across a round
 // trip. Whole-blob Encrypt and Decrypt never add this framing.
 //
-// Values encrypted before version 2 did not store a tag, so that information does not
+// Values encrypted before version 3 did not store a tag, so that information does not
 // exist anywhere and cannot be recovered: they keep decrypting as strings. Re-encrypting
 // does not help, because by then the original type is already lost. The only way to give
 // such a value its intended type is to re-enter it, for example through

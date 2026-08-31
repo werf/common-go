@@ -106,6 +106,9 @@ func MergeEncodedYamlNode(oldConfig, newConfig, oldEncodedConfig, newEncodedConf
 		if oldConfig.Value == newConfig.Value &&
 			oldConfig.ShortTag() == newConfig.ShortTag() &&
 			oldConfig.Style == newConfig.Style {
+			oldEncodedConfig.HeadComment = newEncodedConfig.HeadComment
+			oldEncodedConfig.LineComment = newEncodedConfig.LineComment
+			oldEncodedConfig.FootComment = newEncodedConfig.FootComment
 			return oldEncodedConfig, nil
 		}
 		return newEncodedConfig, nil

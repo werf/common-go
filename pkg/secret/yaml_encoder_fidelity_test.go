@@ -69,14 +69,14 @@ var _ = Describe("YamlEncoder scalar fidelity", func() {
 		Expect(string(decrypted)).To(Equal(data))
 	})
 
-	It("emits the ciphertext as an ordinary string scalar so that older readers accept it", func() {
+	It("emits the ciphertext as an ordinary string scalar", func() {
 		encrypted, err := encoder.EncryptYamlData([]byte("v: 123\n"))
 		Expect(err).NotTo(HaveOccurred())
 
 		cipherScalar := scalarOf(string(encrypted))
 		Expect(cipherScalar.ShortTag()).To(Equal("!!str"))
 		Expect(cipherScalar.Style).To(Equal(yaml_v3.Style(0)))
-		Expect(cipherScalar.Value).To(HavePrefix("0200"))
+		Expect(cipherScalar.Value).To(HavePrefix("0300"))
 	})
 
 	It("preserves comments attached to a value and to a key", func() {
@@ -141,15 +141,30 @@ var _ = Describe("YamlEncoder scalar fidelity", func() {
 		Expect(string(decoded)).NotTo(ContainSubstring(string([]byte{scalarFrameSeparator})))
 	})
 
-	It("reports an unframed payload found in a YAML value instead of corrupting it", func() {
+	It("decrypts an unframed whole blob stored in a YAML value", func() {
 		aesEncoder, err := NewAesEncoder(AesSecretKey)
 		Expect(err).NotTo(HaveOccurred())
 
 		blob, err := aesEncoder.Encrypt([]byte("no framing here"))
 		Expect(err).NotTo(HaveOccurred())
 
-		_, err = NewYamlEncoder(aesEncoder).DecryptYamlData([]byte("v: " + string(blob) + "\n"))
-		Expect(err).To(MatchError(ContainSubstring("malformed encrypted scalar payload")))
+		decrypted, err := NewYamlEncoder(aesEncoder).DecryptYamlData([]byte("v: " + string(blob) + "\n"))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(scalarOf(string(decrypted)).Value).To(Equal("no framing here"))
+	})
+
+	It("does not interpret whole blobs as scalar frames", func() {
+		aesEncoder, err := NewAesEncoder(AesSecretKey)
+		Expect(err).NotTo(HaveOccurred())
+
+		for _, content := range []string{"!!str\x000\x00hello", "!!str\x00"} {
+			blob, err := aesEncoder.Encrypt([]byte(content))
+			Expect(err).NotTo(HaveOccurred())
+
+			decrypted, err := NewYamlEncoder(aesEncoder).DecryptYamlData([]byte("v: " + string(blob) + "\n"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(scalarOf(string(decrypted)).Value).To(Equal(content))
+		}
 	})
 
 	It("still decrypts a legacy ciphertext as a plain string", func() {

@@ -12,9 +12,9 @@ import (
 type YamlEncoder struct {
 	Encoder Encoder
 
-	generateFunc func([]byte) ([]byte, error)
-	extractFunc  func([]byte) ([]byte, error)
-	formatAware  formatAwareDecrypter
+	generateFunc	func([]byte) ([]byte, error)
+	extractFunc	func([]byte) ([]byte, error)
+	formatAware	formatAwareEncoder
 }
 
 func NewYamlEncoder(encoder Encoder) *YamlEncoder {
@@ -24,7 +24,7 @@ func NewYamlEncoder(encoder Encoder) *YamlEncoder {
 		yamlEncoder.generateFunc = encoder.Encrypt
 		yamlEncoder.extractFunc = encoder.Decrypt
 
-		if formatAware, ok := encoder.(formatAwareDecrypter); ok {
+		if formatAware, ok := encoder.(formatAwareEncoder); ok {
 			yamlEncoder.formatAware = formatAware
 		}
 	} else {
@@ -45,7 +45,12 @@ func (s *YamlEncoder) Encrypt(data []byte) ([]byte, error) {
 }
 
 func (s *YamlEncoder) EncryptYamlData(data []byte) ([]byte, error) {
-	resultData, err := doYamlDataV2(s.generateFunc, s.formatAware, data, encryptYamlMode)
+	generateFunc := s.generateFunc
+	if s.formatAware != nil {
+		generateFunc = s.formatAware.encryptYamlScalar
+	}
+
+	resultData, err := doYamlDataV2(generateFunc, s.formatAware, data, encryptYamlMode)
 	if err != nil {
 		return nil, fmt.Errorf("encryption failed: check encryption key and data: %w", err)
 	}
@@ -79,7 +84,7 @@ func (s *YamlEncoder) DecryptYamlData(data []byte) ([]byte, error) {
 	return resultData, nil
 }
 
-func doYamlDataV2(doFunc func([]byte) ([]byte, error), formatAware formatAwareDecrypter, data []byte, mode yamlProcessorMode) ([]byte, error) {
+func doYamlDataV2(doFunc func([]byte) ([]byte, error), formatAware formatAwareEncoder, data []byte, mode yamlProcessorMode) ([]byte, error) {
 	var config yaml_v3.Node
 
 	if err := yaml_v3.Unmarshal(data, &config); err != nil {
@@ -138,7 +143,7 @@ func deepCopyNode(node *yaml_v3.Node) *yaml_v3.Node {
 	return copyNode
 }
 
-func doYamlValueSecretV2(doFunc func([]byte) ([]byte, error), formatAware formatAwareDecrypter, node *yaml_v3.Node, mode yamlProcessorMode) (*yaml_v3.Node, error) {
+func doYamlValueSecretV2(doFunc func([]byte) ([]byte, error), formatAware formatAwareEncoder, node *yaml_v3.Node, mode yamlProcessorMode) (*yaml_v3.Node, error) {
 	switch node.Kind {
 	case yaml_v3.DocumentNode:
 		for pos := 0; pos < len(node.Content); pos += 1 {
@@ -235,7 +240,7 @@ func doYamlValueSecretV2(doFunc func([]byte) ([]byte, error), formatAware format
 	return node, nil
 }
 
-func scalarPlainText(formatAware formatAwareDecrypter, node *yaml_v3.Node) ([]byte, error) {
+func scalarPlainText(formatAware formatAwareEncoder, node *yaml_v3.Node) ([]byte, error) {
 	if formatAware != nil {
 		return frameScalar(node.ShortTag(), node.Style, node.Value), nil
 	}
@@ -248,13 +253,13 @@ func scalarPlainText(formatAware formatAwareDecrypter, node *yaml_v3.Node) ([]by
 	return []byte(fmt.Sprintf("%v", value)), nil
 }
 
-func decryptScalarWithMetadata(formatAware formatAwareDecrypter, node *yaml_v3.Node, value string) error {
+func decryptScalarWithMetadata(formatAware formatAwareEncoder, node *yaml_v3.Node, value string) error {
 	plainText, version, err := formatAware.decryptWithFormat([]byte(value))
 	if err != nil {
 		return err
 	}
 
-	if version != formatVersionAesGCM {
+	if version != formatVersionAesGCMYaml {
 		return encodeScalarPreservingComments(node, string(plainText))
 	}
 

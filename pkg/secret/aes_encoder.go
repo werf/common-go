@@ -14,8 +14,9 @@ import (
 )
 
 const (
-	formatVersionLegacyCBC uint16 = 16
-	formatVersionAesGCM    uint16 = 2
+	formatVersionLegacyCBC	uint16 = 16
+	formatVersionAesGCM	uint16 = 2
+	formatVersionAesGCMYaml	uint16 = 3
 
 	formatVersionSize = 2
 	gcmNonceSize      = 12
@@ -38,7 +39,7 @@ type AesEncoder struct {
 	CipherBlock cipher.Block
 }
 
-var _ formatAwareDecrypter = (*AesEncoder)(nil)
+var _ formatAwareEncoder = (*AesEncoder)(nil)
 
 func GenerateAesSecretKey() ([]byte, error) {
 	randomBytes := make([]byte, 16)
@@ -67,13 +68,21 @@ func NewAesEncoder(key []byte) (*AesEncoder, error) {
 }
 
 func (s *AesEncoder) Encrypt(data []byte) ([]byte, error) {
+	return s.encryptWithFormat(data, formatVersionAesGCM)
+}
+
+func (s *AesEncoder) encryptYamlScalar(data []byte) ([]byte, error) {
+	return s.encryptWithFormat(data, formatVersionAesGCMYaml)
+}
+
+func (s *AesEncoder) encryptWithFormat(data []byte, version uint16) ([]byte, error) {
 	gcm, err := cipher.NewGCM(s.CipherBlock)
 	if err != nil {
 		return nil, fmt.Errorf("initialize aes-gcm: %w", err)
 	}
 
 	args := make([]byte, formatVersionSize+gcmNonceSize)
-	binary.LittleEndian.PutUint16(args[:formatVersionSize], formatVersionAesGCM)
+	binary.LittleEndian.PutUint16(args[:formatVersionSize], version)
 
 	nonce := args[formatVersionSize:]
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
@@ -116,7 +125,7 @@ func (s *AesEncoder) decryptWithFormat(data []byte) ([]byte, uint16, error) {
 	case formatVersionLegacyCBC:
 		result, err := s.decryptLegacyCBC(dataToExtract)
 		return result, version, err
-	case formatVersionAesGCM:
+	case formatVersionAesGCM, formatVersionAesGCMYaml:
 		result, err := s.decryptAesGCM(dataToExtract)
 		return result, version, err
 	default:
@@ -152,6 +161,9 @@ func (s *AesEncoder) decryptAesGCM(dataToExtract []byte) ([]byte, error) {
 	if len(dataToExtract) < minimumDataBinarySize {
 		return nil, minimumDataLengthError(minimumDataBinarySize)
 	}
+	if matchesLegacyLayout(len(dataToExtract)) {
+		return nil, errAuthenticationFailed
+	}
 
 	nonce := dataToExtract[formatVersionSize : formatVersionSize+gcmNonceSize]
 	cipherText := dataToExtract[formatVersionSize+gcmNonceSize:]
@@ -161,7 +173,7 @@ func (s *AesEncoder) decryptAesGCM(dataToExtract []byte) ([]byte, error) {
 		return nil, errAuthenticationFailed
 	}
 
-	return unfill(result)
+	return unfill(result, gcm.Overhead())
 }
 
 // A container whose size matches the legacy layout could be handed to the CBC reader by
@@ -196,7 +208,7 @@ func matchesLegacyLayout(containerSize int) bool {
 		(containerSize-formatVersionSize-aes.BlockSize)%aes.BlockSize == 0
 }
 
-func unfill(sealed []byte) ([]byte, error) {
+func unfill(sealed []byte, overhead int) ([]byte, error) {
 	if len(sealed) < gcmFillerSizeLen {
 		return nil, errAuthenticationFailed
 	}
@@ -206,7 +218,12 @@ func unfill(sealed []byte) ([]byte, error) {
 		return nil, errAuthenticationFailed
 	}
 
-	return sealed[:len(sealed)-filler-gcmFillerSizeLen], nil
+	dataSize := len(sealed) - filler - gcmFillerSizeLen
+	if filler != fillerSizeFor(dataSize, overhead) || !bytes.Equal(sealed[dataSize:len(sealed)-gcmFillerSizeLen], bytes.Repeat([]byte{0}, filler)) {
+		return nil, errAuthenticationFailed
+	}
+
+	return sealed[:dataSize], nil
 }
 
 func legacyCBCMinimumDataBinarySize() int {
