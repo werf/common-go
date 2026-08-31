@@ -101,7 +101,14 @@ func MergeEncodedYamlNode(oldConfig, newConfig, oldEncodedConfig, newEncodedConf
 		newEncodedConfig.Alias = newAliasNode
 
 	case yaml_v3.ScalarNode:
-		if oldConfig.Value == newConfig.Value {
+		// The tag and the style are part of what gets encrypted, so a change to either of
+		// them has to produce new ciphertext even when the raw value is untouched.
+		if oldConfig.Value == newConfig.Value &&
+			oldConfig.ShortTag() == newConfig.ShortTag() &&
+			oldConfig.Style == newConfig.Style {
+			oldEncodedConfig.HeadComment = newEncodedConfig.HeadComment
+			oldEncodedConfig.LineComment = newEncodedConfig.LineComment
+			oldEncodedConfig.FootComment = newEncodedConfig.FootComment
 			return oldEncodedConfig, nil
 		}
 		return newEncodedConfig, nil
