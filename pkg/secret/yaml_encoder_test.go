@@ -103,10 +103,8 @@ image:
 `),
 	)
 
-	// An Encoder without the format-aware capability, such as EncoderMock here, keeps the
-	// original behaviour of stringifying every scalar. AesEncoder stores the tag and the
-	// style inside the payload instead, which is covered by "YamlEncoder scalar fidelity".
-	It("should encode integer, bool, float, timestamp and binary as string, then convert to string during decode, for an encoder without format support", func() {
+	// TODO: support restoring of original type during decode
+	It("should encode integer, bool, float, timestamp and binary as string, then convert to string during decode", func() {
 		originalData := `
 mystring: value
 mybool: !!bool true

@@ -6,7 +6,6 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	yaml_v3 "gopkg.in/yaml.v3"
 )
 
 type MergeEncodedYamlTest struct {
@@ -480,49 +479,4 @@ hosts:
 `),
 		}),
 	)
-})
-
-var _ = Describe("MergeEncodedYaml scalar metadata", func() {
-	DescribeTable("reuse the old encoded value only when the value, the tag and the style are all unchanged",
-		func(oldData, newData, expectedResult string) {
-			const oldEncodedData = "v: OLD\n"
-			const newEncodedData = "v: NEW\n"
-
-			res, err := MergeEncodedYaml([]byte(oldData), []byte(newData), []byte(oldEncodedData), []byte(newEncodedData))
-			Expect(err).To(Succeed())
-			Expect(string(res)).To(Equal(expectedResult))
-		},
-		Entry("nothing changed", "v: 123\n", "v: 123\n", "v: OLD\n"),
-		Entry("value changed", "v: 123\n", "v: 124\n", "v: NEW\n"),
-		Entry("type changed from string to integer", "v: \"123\"\n", "v: 123\n", "v: NEW\n"),
-		Entry("type changed from integer to string", "v: 123\n", "v: \"123\"\n", "v: NEW\n"),
-		Entry("style changed from folded block to plain", "v: >-\n  hi\n", "v: hi\n", "v: NEW\n"),
-		Entry("style changed from plain to folded block", "v: hi\n", "v: >-\n  hi\n", "v: NEW\n"),
-		Entry("style changed from plain to double quoted", "v: hi\n", "v: \"hi\"\n", "v: NEW\n"),
-		Entry("explicit and implicit string tags are equal", "v: hi\n", "v: hi\n", "v: OLD\n"),
-	)
-
-	DescribeTable("keeps a comment-only edit while reusing ciphertext",
-		func(oldData, newData, oldEncodedData, newEncodedData, expected string) {
-			merged, err := MergeEncodedYaml([]byte(oldData), []byte(newData), []byte(oldEncodedData), []byte(newEncodedData))
-			Expect(err).NotTo(HaveOccurred())
-			Expect(string(merged)).To(Equal(expected))
-		},
-		Entry("replaced line comment", "v: value # old\n", "v: value # new\n", "v: OLD # old\n", "v: NEW # new\n", "v: OLD # new\n"),
-		Entry("removed line comment", "v: value # old\n", "v: value\n", "v: OLD # old\n", "v: NEW\n", "v: OLD\n"),
-	)
-
-	It("preserves comments when reusing ciphertext", func() {
-		oldConfig := &yaml_v3.Node{Kind: yaml_v3.ScalarNode, Tag: "!!str", Value: "value"}
-		newConfig := &yaml_v3.Node{Kind: yaml_v3.ScalarNode, Tag: "!!str", Value: "value"}
-		oldEncodedConfig := &yaml_v3.Node{Kind: yaml_v3.ScalarNode, Tag: "!!str", Value: "OLD", HeadComment: "old head", LineComment: "old line", FootComment: "old foot"}
-		newEncodedConfig := &yaml_v3.Node{Kind: yaml_v3.ScalarNode, Tag: "!!str", Value: "NEW", HeadComment: "new head", LineComment: "new line", FootComment: "new foot"}
-
-		merged, err := MergeEncodedYamlNode(oldConfig, newConfig, oldEncodedConfig, newEncodedConfig)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(merged.Value).To(Equal("OLD"))
-		Expect(merged.HeadComment).To(Equal("new head"))
-		Expect(merged.LineComment).To(Equal("new line"))
-		Expect(merged.FootComment).To(Equal("new foot"))
-	})
 })
