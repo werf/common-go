@@ -2,8 +2,9 @@ package secret
 
 import (
 	"fmt"
-	"gopkg.in/yaml.v3"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -103,8 +104,10 @@ image:
 `),
 	)
 
-	// TODO: support restoring of original type during decode
-	It("should encode integer, bool, float, timestamp and binary as string, then convert to string during decode", func() {
+	// An Encoder without the format-aware capability, such as EncoderMock here, keeps the
+	// original behaviour of stringifying every scalar. AesEncoder stores the tag and the
+	// style inside the payload instead, which is covered by "YamlEncoder scalar fidelity".
+	It("should encode integer, bool, float, timestamp and binary as string, then convert to string during decode, for an encoder without format support", func() {
 		originalData := `
 mystring: value
 mybool: !!bool true
