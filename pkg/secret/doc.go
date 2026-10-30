@@ -76,6 +76,8 @@
 // does not help, because by then the original type is already lost. The only way to give
 // such a value its intended type is to re-enter it, for example through
 // "werf helm secret values edit".
+// DecryptYamlDataWithUntypedScalars reports where such values are, so that a caller can
+// point them out.
 //
 // A comment attached to an encrypted value is preserved, which means it stays cleartext in
 // the encrypted file, the same way mapping keys already do. Do not put secrets in
