@@ -116,3 +116,74 @@ func TestDecryptYamlDataWithUntypedScalarsWithoutFormatAwareEncoder(t *testing.T
 		t.Errorf("expected no untyped scalars, got %#v", untypedScalars)
 	}
 }
+
+func TestDecryptYamlDataWithUntypedScalarsFails(t *testing.T) {
+	encoder, err := NewAesEncoder(legacyFixtureKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	otherEncoder, err := NewAesEncoder(AesSecretKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	blob, err := encoder.Encrypt([]byte("42"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	scalar, err := encoder.encryptYamlScalar(frameScalar("!!int", 0, "42"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	otherKeyScalar, err := otherEncoder.encryptYamlScalar(frameScalar("!!int", 0, "42"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	unframedScalar, err := encoder.encryptYamlScalar([]byte("42"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const legacyScalar = "int: 100049fb3706a4dc50af98db279edad4d2eee12ebc001536f6f07f28a99af986bcb7\n"
+
+	tests := []struct {
+		name string
+		data string
+	}{
+		{name: "malformed ciphertext after a legacy value", data: legacyScalar + "bad: 10zz\n"},
+		{name: "current format with a wrong key", data: legacyScalar + "bad: " + string(otherKeyScalar) + "\n"},
+		{name: "tampered whole-blob value", data: legacyScalar + "bad: " + tamperLastHexDigit(blob) + "\n"},
+		{name: "tampered current format", data: legacyScalar + "bad: " + tamperLastHexDigit(scalar) + "\n"},
+		{name: "current format without scalar framing", data: legacyScalar + "bad: " + string(unframedScalar) + "\n"},
+	}
+
+	yamlEncoder := NewYamlEncoder(encoder)
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result, untypedScalars, err := yamlEncoder.DecryptYamlDataWithUntypedScalars([]byte(test.data))
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+
+			if result != nil || untypedScalars != nil {
+				t.Errorf("expected no result and no untyped scalars on error, got %q and %#v", result, untypedScalars)
+			}
+		})
+	}
+}
+
+func tamperLastHexDigit(encoded []byte) string {
+	tampered := []byte(string(encoded))
+	if tampered[len(tampered)-1] == '0' {
+		tampered[len(tampered)-1] = '1'
+	} else {
+		tampered[len(tampered)-1] = '0'
+	}
+
+	return string(tampered)
+}
