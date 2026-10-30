@@ -19,6 +19,34 @@ var (
 	legacyFixtureSecretFile = []byte("100052fb0fa1cc8ef1cb123be089cdb853cc153772691b8fb743d612a7b64d65614d4d8745250752564941227eb8d7161523")
 )
 
+// Produced with legacyFixtureKey by EncryptYamlData of common-go 366cad5, the last commit
+// that wrote the legacy format, from:
+//
+//	int: 123
+//	bool: true
+//	float: 1.5
+//	str: "123"
+//	word: hello
+//	empty: ""
+//	list:
+//	  - 7
+//	  - text
+//	nested:
+//	  port: 8080
+//
+// Must never be regenerated.
+const legacyFixtureTypedSecretValues = "int: 100049fb3706a4dc50af98db279edad4d2eee12ebc001536f6f07f28a99af986bcb7\n" +
+	"bool: 100011c3864f8d033f8939302c526d80fa2210341e83659c67affc436690987b1d7c\n" +
+	"float: 10007233c3e253d6dcba511ededbf1f48babc482c1187e432de9c06145c8a9f3611d\n" +
+	"str: 1000e328b697103331fe3bbecb5149dd67b0c2222d1cd92d54d68cc91a1cc7179f8d\n" +
+	"word: 1000473fdef8d8975c864ba435da451b21b99139ae294d57791677f24fcbdd097e1b\n" +
+	"empty: 10002deb30270b0bbf8791981c8f64658eb2d300a551a2af75fb354934223ec90113\n" +
+	"list:\n" +
+	"  - 100053d4b400566e5825126073067824be7f50b0cc62264d028951e9b0fdce26dd6d\n" +
+	"  - 100005053b5d681b05a389607d3df93a9fac96db2818d2664ebd53a6115630d4b5df\n" +
+	"nested:\n" +
+	"  port: 100073da155b059e690fa5c0dc893ceb8df5eff9c264361276e4116b4914c728a559\n"
+
 func TestLegacyFixtureYamlDataDecrypts(t *testing.T) {
 	tests := []struct {
 		name     string
