@@ -89,7 +89,8 @@ type UntypedScalar struct {
 
 // DecryptYamlDataWithUntypedScalars works like DecryptYamlData and also returns the
 // scalars that were decrypted from a format without YAML type metadata, in document
-// order. Nothing is reported when the Encoder does not record a format version.
+// order. A scalar is reported once, where it is defined, and not again where an alias
+// refers to it. Nothing is reported when the Encoder does not record a format version.
 func (s *YamlEncoder) DecryptYamlDataWithUntypedScalars(data []byte) ([]byte, []UntypedScalar, error) {
 	untypedScalars := []UntypedScalar{}
 	return s.decryptYamlData(data, &untypedScalars)
@@ -203,7 +204,8 @@ func doYamlValueSecretV2(doFunc func([]byte) ([]byte, error), formatAware format
 		}
 
 	case yaml_v3.AliasNode:
-		newAliasNode, err := doYamlValueSecretV2(doFunc, formatAware, deepCopyNode(node.Alias), mode, path, untypedScalars)
+		// The anchored node has already been reported where it is defined.
+		newAliasNode, err := doYamlValueSecretV2(doFunc, formatAware, deepCopyNode(node.Alias), mode, path, nil)
 		if err != nil {
 			return nil, fmt.Errorf("unable to process an alias node %q: %w", node.Value, err)
 		}

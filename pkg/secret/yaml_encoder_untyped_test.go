@@ -62,6 +62,16 @@ func TestDecryptYamlDataWithUntypedScalars(t *testing.T) {
 			expected: []UntypedScalar{{Path: []interface{}{"legacy", 0}, Value: "123"}},
 		},
 		{
+			name: "anchors, aliases and merge keys",
+			data: "base: &base\n  port: 100073da155b059e690fa5c0dc893ceb8df5eff9c264361276e4116b4914c728a559\n" +
+				"derived:\n  <<: *base\n  copy: &int 100049fb3706a4dc50af98db279edad4d2eee12ebc001536f6f07f28a99af986bcb7\n" +
+				"aliased: *int\n",
+			expected: []UntypedScalar{
+				{Path: []interface{}{"base", "port"}, Value: "8080"},
+				{Path: []interface{}{"derived", "copy"}, Value: "123"},
+			},
+		},
+		{
 			name:     "whole-blob value",
 			data:     "blob: " + string(blob) + "\n",
 			expected: []UntypedScalar{{Path: []interface{}{"blob"}, Value: "42"}},
