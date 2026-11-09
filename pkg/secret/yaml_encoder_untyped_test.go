@@ -1,0 +1,189 @@
+package secret
+
+import (
+	"reflect"
+	"testing"
+)
+
+func TestDecryptYamlDataWithUntypedScalars(t *testing.T) {
+	encoder, err := NewAesEncoder(legacyFixtureKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	yamlEncoder := NewYamlEncoder(encoder)
+
+	typedValues, err := yamlEncoder.EncryptYamlData([]byte("typed: 1\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	blob, err := encoder.Encrypt([]byte("42"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name     string
+		data     string
+		expected []UntypedScalar
+	}{
+		{
+			name: "legacy werf fixture",
+			data: legacyFixtureSecretValues,
+			expected: []UntypedScalar{
+				{Path: []interface{}{"added_via_secret_values"}, Value: "added_via_secret_values"},
+				{Path: []interface{}{"overridden_via_secret_values"}, Value: "overridden_via_secret_values"},
+			},
+		},
+		{
+			name: "legacy values of every type",
+			data: legacyFixtureTypedSecretValues,
+			expected: []UntypedScalar{
+				{Path: []interface{}{"int"}, Value: "123"},
+				{Path: []interface{}{"bool"}, Value: "true"},
+				{Path: []interface{}{"float"}, Value: "1.5"},
+				{Path: []interface{}{"str"}, Value: "123"},
+				{Path: []interface{}{"word"}, Value: "hello"},
+				{Path: []interface{}{"empty"}, Value: ""},
+				{Path: []interface{}{"list", 0}, Value: "7"},
+				{Path: []interface{}{"list", 1}, Value: "text"},
+				{Path: []interface{}{"nested", "port"}, Value: "8080"},
+			},
+		},
+		{
+			name:     "current format",
+			data:     string(typedValues),
+			expected: []UntypedScalar{},
+		},
+		{
+			name:     "current format mixed with a legacy value",
+			data:     string(typedValues) + "legacy:\n  - 100049fb3706a4dc50af98db279edad4d2eee12ebc001536f6f07f28a99af986bcb7\n",
+			expected: []UntypedScalar{{Path: []interface{}{"legacy", 0}, Value: "123"}},
+		},
+		{
+			name: "anchors, aliases and merge keys",
+			data: "base: &base\n  port: 100073da155b059e690fa5c0dc893ceb8df5eff9c264361276e4116b4914c728a559\n" +
+				"derived:\n  <<: *base\n  copy: &int 100049fb3706a4dc50af98db279edad4d2eee12ebc001536f6f07f28a99af986bcb7\n" +
+				"aliased: *int\n",
+			expected: []UntypedScalar{
+				{Path: []interface{}{"base", "port"}, Value: "8080"},
+				{Path: []interface{}{"derived", "copy"}, Value: "123"},
+			},
+		},
+		{
+			name:     "whole-blob value",
+			data:     "blob: " + string(blob) + "\n",
+			expected: []UntypedScalar{{Path: []interface{}{"blob"}, Value: "42"}},
+		},
+		{
+			name:     "empty and null values are not encrypted",
+			data:     "empty: \"\"\nnull:\n",
+			expected: []UntypedScalar{},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result, untypedScalars, err := yamlEncoder.DecryptYamlDataWithUntypedScalars([]byte(test.data))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if !reflect.DeepEqual(untypedScalars, test.expected) {
+				t.Errorf("\n[EXPECTED]: %#v\n[GOT]: %#v", test.expected, untypedScalars)
+			}
+
+			expectedResult, err := yamlEncoder.DecryptYamlData([]byte(test.data))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if string(result) != string(expectedResult) {
+				t.Errorf("result differs from DecryptYamlData\n[EXPECTED]: %q\n[GOT]: %q", expectedResult, result)
+			}
+		})
+	}
+}
+
+func TestDecryptYamlDataWithUntypedScalarsWithoutFormatAwareEncoder(t *testing.T) {
+	_, untypedScalars, err := NewYamlEncoder(&EncoderMock{}).DecryptYamlDataWithUntypedScalars([]byte("v: abc\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(untypedScalars) != 0 {
+		t.Errorf("expected no untyped scalars, got %#v", untypedScalars)
+	}
+}
+
+func TestDecryptYamlDataWithUntypedScalarsFails(t *testing.T) {
+	encoder, err := NewAesEncoder(legacyFixtureKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	otherEncoder, err := NewAesEncoder(AesSecretKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	blob, err := encoder.Encrypt([]byte("42"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	scalar, err := encoder.encryptYamlScalar(frameScalar("!!int", 0, "42"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	otherKeyScalar, err := otherEncoder.encryptYamlScalar(frameScalar("!!int", 0, "42"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	unframedScalar, err := encoder.encryptYamlScalar([]byte("42"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const legacyScalar = "int: 100049fb3706a4dc50af98db279edad4d2eee12ebc001536f6f07f28a99af986bcb7\n"
+
+	tests := []struct {
+		name string
+		data string
+	}{
+		{name: "malformed ciphertext after a legacy value", data: legacyScalar + "bad: 10zz\n"},
+		{name: "current format with a wrong key", data: legacyScalar + "bad: " + string(otherKeyScalar) + "\n"},
+		{name: "tampered whole-blob value", data: legacyScalar + "bad: " + tamperLastHexDigit(blob) + "\n"},
+		{name: "tampered current format", data: legacyScalar + "bad: " + tamperLastHexDigit(scalar) + "\n"},
+		{name: "current format without scalar framing", data: legacyScalar + "bad: " + string(unframedScalar) + "\n"},
+	}
+
+	yamlEncoder := NewYamlEncoder(encoder)
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result, untypedScalars, err := yamlEncoder.DecryptYamlDataWithUntypedScalars([]byte(test.data))
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+
+			if result != nil || untypedScalars != nil {
+				t.Errorf("expected no result and no untyped scalars on error, got %q and %#v", result, untypedScalars)
+			}
+		})
+	}
+}
+
+func tamperLastHexDigit(encoded []byte) string {
+	tampered := []byte(string(encoded))
+	if tampered[len(tampered)-1] == '0' {
+		tampered[len(tampered)-1] = '1'
+	} else {
+		tampered[len(tampered)-1] = '0'
+	}
+
+	return string(tampered)
+}

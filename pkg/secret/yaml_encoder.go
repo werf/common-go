@@ -50,7 +50,7 @@ func (s *YamlEncoder) EncryptYamlData(data []byte) ([]byte, error) {
 		generateFunc = s.formatAware.encryptYamlScalar
 	}
 
-	resultData, err := doYamlDataV2(generateFunc, s.formatAware, data, encryptYamlMode)
+	resultData, err := doYamlDataV2(generateFunc, s.formatAware, data, encryptYamlMode, nil)
 	if err != nil {
 		return nil, fmt.Errorf("encryption failed: check encryption key and data: %w", err)
 	}
@@ -72,26 +72,55 @@ func (s *YamlEncoder) Decrypt(data []byte) ([]byte, error) {
 }
 
 func (s *YamlEncoder) DecryptYamlData(data []byte) ([]byte, error) {
-	resultData, err := doYamlDataV2(s.extractFunc, s.formatAware, data, decryptYamlMode)
-	if err != nil {
-		if IsExtractDataError(err) {
-			return nil, fmt.Errorf("decryption failed: check data `%s`: %w", string(data), err)
-		}
-
-		return nil, fmt.Errorf("decryption failed: check encryption key and data: %w", err)
-	}
-
-	return resultData, nil
+	resultData, _, err := s.decryptYamlData(data, nil)
+	return resultData, err
 }
 
-func doYamlDataV2(doFunc func([]byte) ([]byte, error), formatAware formatAwareEncoder, data []byte, mode yamlProcessorMode) ([]byte, error) {
+// UntypedScalar is an encrypted YAML scalar whose ciphertext holds no YAML tag, so it was
+// decrypted as a string whatever its original type. See the "YAML scalars" section of the
+// package documentation.
+type UntypedScalar struct {
+	// Path holds the mapping keys (string) and sequence indexes (int) leading from the
+	// document root to the scalar.
+	Path []interface{}
+	// Value is the decrypted value.
+	Value string
+}
+
+// DecryptYamlDataWithUntypedScalars works like DecryptYamlData and also returns the
+// scalars that were decrypted from a format without YAML type metadata, in document
+// order. A scalar is reported once, where it is defined, and not again where an alias
+// refers to it. Nothing is reported when the Encoder does not record a format version.
+func (s *YamlEncoder) DecryptYamlDataWithUntypedScalars(data []byte) ([]byte, []UntypedScalar, error) {
+	untypedScalars := []UntypedScalar{}
+	return s.decryptYamlData(data, &untypedScalars)
+}
+
+func (s *YamlEncoder) decryptYamlData(data []byte, untypedScalars *[]UntypedScalar) ([]byte, []UntypedScalar, error) {
+	resultData, err := doYamlDataV2(s.extractFunc, s.formatAware, data, decryptYamlMode, untypedScalars)
+	if err != nil {
+		if IsExtractDataError(err) {
+			return nil, nil, fmt.Errorf("decryption failed: check data `%s`: %w", string(data), err)
+		}
+
+		return nil, nil, fmt.Errorf("decryption failed: check encryption key and data: %w", err)
+	}
+
+	if untypedScalars == nil {
+		return resultData, nil, nil
+	}
+
+	return resultData, *untypedScalars, nil
+}
+
+func doYamlDataV2(doFunc func([]byte) ([]byte, error), formatAware formatAwareEncoder, data []byte, mode yamlProcessorMode, untypedScalars *[]UntypedScalar) ([]byte, error) {
 	var config yaml_v3.Node
 
 	if err := yaml_v3.Unmarshal(data, &config); err != nil {
 		return nil, fmt.Errorf("unable to unmarshal config data: %w", err)
 	}
 
-	resultConfig, err := doYamlValueSecretV2(doFunc, formatAware, deepCopyNode(&config), mode)
+	resultConfig, err := doYamlValueSecretV2(doFunc, formatAware, deepCopyNode(&config), mode, nil, untypedScalars)
 	if err != nil {
 		return nil, fmt.Errorf("unable to process config secrets: %w", err)
 	}
@@ -143,11 +172,11 @@ func deepCopyNode(node *yaml_v3.Node) *yaml_v3.Node {
 	return copyNode
 }
 
-func doYamlValueSecretV2(doFunc func([]byte) ([]byte, error), formatAware formatAwareEncoder, node *yaml_v3.Node, mode yamlProcessorMode) (*yaml_v3.Node, error) {
+func doYamlValueSecretV2(doFunc func([]byte) ([]byte, error), formatAware formatAwareEncoder, node *yaml_v3.Node, mode yamlProcessorMode, path []interface{}, untypedScalars *[]UntypedScalar) (*yaml_v3.Node, error) {
 	switch node.Kind {
 	case yaml_v3.DocumentNode:
 		for pos := 0; pos < len(node.Content); pos += 1 {
-			newValueNode, err := doYamlValueSecretV2(doFunc, formatAware, deepCopyNode(node.Content[pos]), mode)
+			newValueNode, err := doYamlValueSecretV2(doFunc, formatAware, deepCopyNode(node.Content[pos]), mode, path, untypedScalars)
 			if err != nil {
 				return nil, fmt.Errorf("unable to process document key %d: %w", pos, err)
 			}
@@ -158,7 +187,7 @@ func doYamlValueSecretV2(doFunc func([]byte) ([]byte, error), formatAware format
 		for pos := 0; pos < len(node.Content); pos += 2 {
 			keyNode := node.Content[pos]
 			valueNode := node.Content[pos+1]
-			newValueNode, err := doYamlValueSecretV2(doFunc, formatAware, deepCopyNode(valueNode), mode)
+			newValueNode, err := doYamlValueSecretV2(doFunc, formatAware, deepCopyNode(valueNode), mode, appendPath(path, keyNode.Value), untypedScalars)
 			if err != nil {
 				return nil, fmt.Errorf("unable to process map key %q value=%v: %w", keyNode.Value, valueNode.Value, err)
 			}
@@ -167,7 +196,7 @@ func doYamlValueSecretV2(doFunc func([]byte) ([]byte, error), formatAware format
 
 	case yaml_v3.SequenceNode:
 		for pos := 0; pos < len(node.Content); pos += 1 {
-			newValueNode, err := doYamlValueSecretV2(doFunc, formatAware, deepCopyNode(node.Content[pos]), mode)
+			newValueNode, err := doYamlValueSecretV2(doFunc, formatAware, deepCopyNode(node.Content[pos]), mode, appendPath(path, pos), untypedScalars)
 			if err != nil {
 				return nil, fmt.Errorf("unable to process array key %d: %w", pos, err)
 			}
@@ -175,7 +204,8 @@ func doYamlValueSecretV2(doFunc func([]byte) ([]byte, error), formatAware format
 		}
 
 	case yaml_v3.AliasNode:
-		newAliasNode, err := doYamlValueSecretV2(doFunc, formatAware, deepCopyNode(node.Alias), mode)
+		// The anchored node has already been reported where it is defined.
+		newAliasNode, err := doYamlValueSecretV2(doFunc, formatAware, deepCopyNode(node.Alias), mode, path, nil)
 		if err != nil {
 			return nil, fmt.Errorf("unable to process an alias node %q: %w", node.Value, err)
 		}
@@ -196,7 +226,16 @@ func doYamlValueSecretV2(doFunc func([]byte) ([]byte, error), formatAware format
 				}
 
 				if formatAware != nil {
-					return node, decryptScalarWithMetadata(formatAware, node, value)
+					typed, err := decryptScalarWithMetadata(formatAware, node, value)
+					if err != nil {
+						return nil, err
+					}
+
+					if !typed && value != "" && untypedScalars != nil {
+						*untypedScalars = append(*untypedScalars, UntypedScalar{Path: path, Value: node.Value})
+					}
+
+					return node, nil
 				}
 
 				newValue, err := doFunc([]byte(value))
@@ -253,19 +292,27 @@ func scalarPlainText(formatAware formatAwareEncoder, node *yaml_v3.Node) ([]byte
 	return []byte(fmt.Sprintf("%v", value)), nil
 }
 
-func decryptScalarWithMetadata(formatAware formatAwareEncoder, node *yaml_v3.Node, value string) error {
+func appendPath(path []interface{}, element interface{}) []interface{} {
+	result := make([]interface{}, len(path), len(path)+1)
+	copy(result, path)
+
+	return append(result, element)
+}
+
+// decryptScalarWithMetadata reports whether the ciphertext carried the YAML tag of the scalar.
+func decryptScalarWithMetadata(formatAware formatAwareEncoder, node *yaml_v3.Node, value string) (bool, error) {
 	plainText, version, err := formatAware.decryptWithFormat([]byte(value))
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	if version != formatVersionAesGCMYaml {
-		return encodeScalarPreservingComments(node, string(plainText))
+		return false, encodeScalarPreservingComments(node, string(plainText))
 	}
 
 	tag, style, originalValue, err := unframeScalar(plainText)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	node.Kind = yaml_v3.ScalarNode
@@ -275,7 +322,7 @@ func decryptScalarWithMetadata(formatAware formatAwareEncoder, node *yaml_v3.Nod
 	node.Content = nil
 	node.Alias = nil
 
-	return nil
+	return true, nil
 }
 
 func encodeScalarPreservingComments(node *yaml_v3.Node, value string) error {
