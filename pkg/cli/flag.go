@@ -44,7 +44,6 @@ type AddFlagOptions struct {
 // TODO: allow restricted values
 // TODO: allow showing restricted values in usage
 // TODO: pass examples separately from help
-// TODO: allow for []string with no comma-separated values (pflag.StringArrayVar?)
 // TODO: allow for map[string]string with no comma-separated values
 
 // Create and bind a flag to the Cobra command. Corresponding environment variables (if enabled)
