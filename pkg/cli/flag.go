@@ -44,7 +44,6 @@ type AddFlagOptions struct {
 // TODO: allow restricted values
 // TODO: allow showing restricted values in usage
 // TODO: pass examples separately from help
-// TODO: allow for []string with no comma-separated values (pflag.StringArrayVar?)
 // TODO: allow for map[string]string with no comma-separated values
 
 // Create and bind a flag to the Cobra command. Corresponding environment variables (if enabled)
@@ -88,7 +87,7 @@ func AddFlag[T any](cmd *cobra.Command, dest *T, name string, defaultValue T, he
 		}
 	}
 
-	if err := processEnvVars(cmd, envVarRegexExprs, name, dest); err != nil {
+	if err := processEnvVars(cmd, envVarRegexExprs, name, dest, opts.NoSplitOnCommas); err != nil {
 		return fmt.Errorf("process env vars: %w", err)
 	}
 
@@ -173,7 +172,7 @@ func addFlags[T any](cmd *cobra.Command, dest *T, name string, shortName string,
 	return nil
 }
 
-func processEnvVars[T any](cmd *cobra.Command, envVarRegexExprs []*FlagRegexExpr, flagName string, dest T) error {
+func processEnvVars[T any](cmd *cobra.Command, envVarRegexExprs []*FlagRegexExpr, flagName string, dest T, noSplitOnCommas bool) error {
 	for _, regExpr := range envVarRegexExprs {
 		regex, err := regexp.Compile(fmt.Sprintf(`%s`, regExpr.Expr))
 		if err != nil {
@@ -226,9 +225,12 @@ func processEnvVars[T any](cmd *cobra.Command, envVarRegexExprs []*FlagRegexExpr
 		}
 	case *[]string:
 		for key, val := range envs {
-			parts, err := splitComma(val)
-			if err != nil {
-				return fmt.Errorf("split comma-separated environment variable %q with value %q: %w", key, val, err)
+			parts := []string{val}
+			if !noSplitOnCommas {
+				var err error
+				if parts, err = splitComma(val); err != nil {
+					return fmt.Errorf("split comma-separated environment variable %q with value %q: %w", key, val, err)
+				}
 			}
 
 			for _, part := range parts {
